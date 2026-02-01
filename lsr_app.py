@@ -9,6 +9,7 @@ from lsr_core import (
     search_pubmed,
     fetch_pubmed_records_fast,
     search_openalex,
+    search_arxiv,
     update_lsr_database
 )
 
@@ -175,7 +176,7 @@ st.subheader("1️⃣ Search Strategy")
 
 database_choice = st.selectbox(
     "Database",
-    ["pubmed", "openalex"]
+    ["pubmed", "openalex", "arxiv"]
 )
 
 
@@ -202,6 +203,15 @@ elif database_choice == "openalex":
     exclude_terms = st.text_input(
         "Exclude concepts (comma-separated)",
         placeholder="animals"
+    )
+
+elif database_choice == "arxiv":
+    st.caption("arXiv native Boolean syntax")
+
+    arxiv_query = st.text_area(
+        "arXiv search query",
+        height=120,
+        placeholder="(ti:replication OR abs:replication) AND cat:stat.ME"
     )
 
 
@@ -333,6 +343,28 @@ if st.button("▶ Run Search"):
             )
 
         st.success(f"OpenAlex returned {total_hits} records.")
+
+        with st.spinner("🧠 Updating project database..."):
+            update_lsr_database(
+                records,
+                project_csv=csv_file,
+                search_start_year=start_year,
+                search_end_year=end_year
+            )
+
+    elif database_choice == "arxiv":
+
+        if not arxiv_query.strip():
+            st.error("❌ arXiv query cannot be empty.")
+            st.stop()
+
+        with st.spinner("🔎 Searching arXiv..."):
+            records, total_hits = search_arxiv(
+                query=arxiv_query,
+                max_results=200
+            )
+
+        st.success(f"arXiv returned {total_hits} records.")
 
         with st.spinner("🧠 Updating project database..."):
             update_lsr_database(

@@ -5,6 +5,7 @@ from Bio import Entrez
 import requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
+import feedparser
 
 # =========================
 # CONFIG
@@ -222,6 +223,55 @@ def search_openalex(
             break
 
         time.sleep(0.3)
+
+    return records, len(records)
+
+# =========================
+# ARXIV SEARCH
+# =========================
+
+
+
+def search_arxiv(
+    query,
+    max_results=200,
+    start=0
+):
+    """
+    query: arXiv native query string, e.g.
+           (ti:replication OR abs:replication) AND cat:stat.ME
+    """
+
+    base_url = "http://export.arxiv.org/api/query"
+
+    params = {
+        "search_query": query,
+        "start": start,
+        "max_results": max_results,
+        "sortBy": "submittedDate",
+        "sortOrder": "descending",
+    }
+
+    response = requests.get(base_url, params=params, timeout=30)
+    response.raise_for_status()
+
+    feed = feedparser.parse(response.text)
+
+    records = []
+
+    for entry in feed.entries:
+        year = None
+        if hasattr(entry, "published"):
+            year = entry.published[:4]
+
+        records.append({
+            "database": "arxiv",
+            "title": entry.title.strip().replace("\n", " "),
+            "journal": "arXiv",
+            "year": year,
+            "abstract": entry.summary.strip().replace("\n", " "),
+            "abstract_source": "arxiv_api",
+        })
 
     return records, len(records)
 
