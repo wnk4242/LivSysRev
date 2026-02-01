@@ -8,6 +8,7 @@ import json
 from lsr_core import (
     search_pubmed,
     fetch_pubmed_records_fast,
+    search_openalex,
     update_lsr_database
 )
 
@@ -170,13 +171,39 @@ csv_file = csv_path(project)
 # SEARCH STRATEGY
 # =========================
 
-st.subheader("1️⃣ PubMed Search Strategy")
+st.subheader("1️⃣ Search Strategy")
 
-query = st.text_area(
-    "Paste PubMed query (DO NOT include date limits):",
-    height=220,
-    value=last_query
+database_choice = st.selectbox(
+    "Database",
+    ["pubmed", "openalex"]
 )
+
+
+if database_choice == "pubmed":
+    query = st.text_area(
+        "Paste PubMed query (DO NOT include date limits):",
+        height=220,
+        value=last_query
+    )
+
+elif database_choice == "openalex":
+    st.caption("Structured Boolean search (OpenAlex)")
+
+    title_terms = st.text_input(
+        "Title terms (comma-separated OR)",
+        placeholder="depression, depressive disorder"
+    )
+
+    abstract_terms = st.text_input(
+        "Abstract terms (comma-separated OR)",
+        placeholder="adolescent, youth"
+    )
+
+    exclude_terms = st.text_input(
+        "Exclude concepts (comma-separated)",
+        placeholder="animals"
+    )
+
 
 st.caption("📜 Search history")
 
@@ -241,54 +268,83 @@ st.subheader("3️⃣ Run Search")
 
 if st.button("▶ Run Search"):
 
-    # ---- validation ----
-    if not query.strip():
-        st.error("❌ Search query cannot be empty.")
-        st.stop()
-
     if start_year > end_year:
         st.error("❌ Start year must be earlier than or equal to end year.")
         st.stop()
 
-    # ---- SAVE QUERY HISTORY IMMEDIATELY ----
-    if query not in query_history:
-        query_history.append(query)
+    # =========================
+    # PUBMED SEARCH
+    # =========================
+    if database_choice == "pubmed":
 
-    metadata.setdefault("pubmed_searches", []).append({
-        "database": "pubmed",
-        "search_strategy": query,
-        "search_start_year": start_year,
-        "search_end_year": end_year,
-        "run_date": pd.Timestamp.today().strftime("%Y-%m-%d"),
-    })
+        if not query.strip():
+            st.error("❌ Search query cannot be empty.")
+            st.stop()
 
-    save_metadata(project, metadata)
+        if query not in query_history:
+            query_history.append(query)
 
-    # ---- SEARCH ----
-    with st.spinner("🔎 Searching PubMed..."):
-        pmids, total_hits = search_pubmed(
-            query,
-            retmax=100,
-            start_year=start_year,
-            end_year=end_year
-        )
+        metadata.setdefault("pubmed_searches", []).append({
+            "database": "pubmed",
+            "search_strategy": query,
+            "search_start_year": start_year,
+            "search_end_year": end_year,
+            "run_date": pd.Timestamp.today().strftime("%Y-%m-%d"),
+        })
 
-    st.success(f"PubMed returned {total_hits} total hits.")
-    st.write(f"PMIDs retrieved in this run: **{len(pmids)}**")
+        save_metadata(project, metadata)
 
-    with st.spinner("📥 Fetching abstracts (XML → PIP fallback)..."):
-        records = fetch_pubmed_records_fast(pmids)
+        with st.spinner("🔎 Searching PubMed..."):
+            pmids, total_hits = search_pubmed(
+                query,
+                retmax=100,
+                start_year=start_year,
+                end_year=end_year
+            )
 
-    with st.spinner("🧠 Updating project database..."):
-        update_lsr_database(
-            records,
-            project_csv=csv_file,
-            search_start_year=start_year,
-            search_end_year=end_year
-        )
+        st.success(f"PubMed returned {total_hits} total hits.")
+        st.write(f"PMIDs retrieved in this run: **{len(pmids)}**")
+
+        with st.spinner("📥 Fetching abstracts (XML → PIP fallback)..."):
+            records = fetch_pubmed_records_fast(pmids)
+
+        with st.spinner("🧠 Updating project database..."):
+            update_lsr_database(
+                records,
+                project_csv=csv_file,
+                search_start_year=start_year,
+                search_end_year=end_year
+            )
+
+    # =========================
+    # OPENALEX SEARCH
+    # =========================
+    elif database_choice == "openalex":
+
+        title_terms_list = [t.strip() for t in title_terms.split(",") if t.strip()]
+        abstract_terms_list = [t.strip() for t in abstract_terms.split(",") if t.strip()]
+        exclude_terms_list = [t.strip() for t in exclude_terms.split(",") if t.strip()]
+
+        with st.spinner("🔎 Searching OpenAlex..."):
+            records, total_hits = search_openalex(
+                title_terms=title_terms_list,
+                abstract_terms=abstract_terms_list,
+                exclude_terms=exclude_terms_list
+            )
+
+        st.success(f"OpenAlex returned {total_hits} records.")
+
+        with st.spinner("🧠 Updating project database..."):
+            update_lsr_database(
+                records,
+                project_csv=csv_file,
+                search_start_year=start_year,
+                search_end_year=end_year
+            )
 
     st.success("🎉 Search completed successfully.")
     st.rerun()
+
 
 # =========================
 # PUBMED SEARCH HISTORY

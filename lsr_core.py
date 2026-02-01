@@ -20,6 +20,19 @@ HEADERS = {
     "User-Agent": "Naike_LiveSR/1.0 (email: wnk4242@gmail.com)"
 }
 # =========================
+# OPENALEX CONFIG
+# =========================
+
+OPENALEX_API_KEY = os.getenv("OPENALEX_API_KEY")
+OPENALEX_BASE_URL = "https://api.openalex.org/works"
+
+OPENALEX_HEADERS = {
+    "User-Agent": "Naike_LiveSR/1.0",
+    "Authorization": f"Bearer {OPENALEX_API_KEY}" if OPENALEX_API_KEY else None
+}
+
+
+# =========================
 # CANONICAL CSV SCHEMA
 # =========================
 
@@ -152,6 +165,66 @@ def fetch_pubmed_records_fast(pmids, batch_size=50):
     return records
 
 # =========================
+# OPENALEX SEARCH
+# =========================
+
+def search_openalex(
+    title_terms,
+    abstract_terms,
+    exclude_terms,
+    per_page=200,
+    max_pages=5
+):
+    filters = []
+
+    if title_terms:
+        filters.append(f"title.search:{'|'.join(title_terms)}")
+
+    if abstract_terms:
+        filters.append(f"abstract.search:{'|'.join(abstract_terms)}")
+
+    for t in exclude_terms or []:
+        filters.append(f"NOT concepts.display_name:{t}")
+
+    filter_string = ",".join(filters)
+
+    records = []
+    cursor = "*"
+
+    for _ in range(max_pages):
+        r = requests.get(
+            OPENALEX_BASE_URL,
+            headers=OPENALEX_HEADERS,
+            params={
+                "filter": filter_string,
+                "per-page": per_page,
+                "cursor": cursor
+            },
+            timeout=30
+        )
+        r.raise_for_status()
+        data = r.json()
+
+        for w in data["results"]:
+            records.append({
+                "database": "openalex",
+                "title": w.get("title"),
+                "journal": w.get("host_venue", {}).get("display_name"),
+                "year": w.get("publication_year"),
+                "abstract": w.get("abstract"),
+                "abstract_source": "openalex",
+            })
+
+        cursor = data["meta"]["next_cursor"]
+        if not cursor:
+            break
+
+        time.sleep(0.3)
+
+    return records, len(records)
+
+
+# =========================
 # UPDATE LSR DATABASE
 # =========================
 def update_lsr_database(records, project_csv, search_start_year, search_end_year):
@@ -193,8 +266,8 @@ def update_lsr_database(records, project_csv, search_start_year, search_end_year
         # ---- REMOVE PMID IF PRESENT ----
         r.pop("pmid", None)
 
-        # ---- MARK SOURCE DATABASE ----
-        r["database"] = "pubmed"
+        # ---- MARK SOURCE DATABASE (default pubmed) ----
+        r["database"] = r.get("database", "pubmed")
 
         # ---- LSR METADATA ----
         r["search_round"] = next_round
