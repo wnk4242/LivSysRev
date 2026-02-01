@@ -27,9 +27,11 @@ OPENALEX_API_KEY = os.getenv("OPENALEX_API_KEY")
 OPENALEX_BASE_URL = "https://api.openalex.org/works"
 
 OPENALEX_HEADERS = {
-    "User-Agent": "Naike_LiveSR/1.0",
-    "Authorization": f"Bearer {OPENALEX_API_KEY}" if OPENALEX_API_KEY else None
+    "User-Agent": "Naike_LiveSR/1.0"
 }
+
+if OPENALEX_API_KEY:
+    OPENALEX_HEADERS["Authorization"] = f"Bearer {OPENALEX_API_KEY}"
 
 
 # =========================
