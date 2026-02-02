@@ -22,6 +22,15 @@ def project_path(name):
 def csv_path(name):
     return os.path.join(project_path(name), "data.csv")
 
+def stage_csv_path(project, stage):
+    mapping = {
+        "Title/abstract screening": "title_abstract.csv",
+        "Full-text screening": "full_text.csv",
+        "Data extraction": "data_extraction.csv"
+    }
+    return os.path.join(project_path(project), mapping[stage])
+
+
 def metadata_path(name):
     return os.path.join(project_path(name), "metadata.json")
 
@@ -72,15 +81,11 @@ st.set_page_config(
     layout="centered"
 )
 
+
 st.title("📚 Living Systematic Review Manager")
 st.write(
     "Document, standardize, and track external database searches "
     "for living systematic reviews."
-)
-
-st.warning(
-    "⚠️ This Streamlit deployment is for demonstration only. "
-    "Uploaded data are not guaranteed to persist."
 )
 
 # =========================
@@ -185,7 +190,7 @@ uploaded_csv = st.file_uploader(
     type=["csv"]
 )
 
-if uploaded_csv and st.button("📥 Import records"):
+if uploaded_csv and st.button("📥 Import and register records"):
 
     if not database_name.strip() or not search_strategy.strip():
         st.error("Database name and search strategy are required.")
@@ -197,6 +202,9 @@ if uploaded_csv and st.button("📥 Import records"):
     except UnicodeDecodeError:
         uploaded_csv.seek(0)
         df_upload = pd.read_csv(uploaded_csv, encoding="latin-1")
+
+    # Save stage-specific dataset for preview
+    df_upload.to_csv(stage_csv_path(project, csv_purpose), index=False)
 
     # ---- COLUMN NORMALIZATION ----
     def norm(c): return c.lower().replace(" ", "").replace("_", "")
@@ -306,15 +314,42 @@ if os.path.exists(csv_file) and os.path.getsize(csv_file) > 0:
 else:
     st.info("No records imported yet.")
 
-# =========================
-# RECORD PREVIEW
-# =========================
 
-st.subheader("4️⃣ Record Preview")
+st.subheader("4️⃣ Record Preview by Screening Stage")
 
-if os.path.exists(csv_file) and os.path.getsize(csv_file) > 0:
-    st.dataframe(
-        df.head(50),
-        use_container_width=True,
-        height=400
-    )
+tab1, tab2, tab3 = st.tabs([
+    "Title/Abstract Screening",
+    "Full-Text Screening",
+    "Data Extraction"
+])
+
+def preview_stage(tab, stage, empty_msg):
+    path = stage_csv_path(project, stage)
+    with tab:
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            df_stage = pd.read_csv(path)
+            st.dataframe(
+                df_stage.head(50),
+                use_container_width=True,
+                height=400
+            )
+        else:
+            st.info(empty_msg)
+
+preview_stage(
+    tab1,
+    "Title/abstract screening",
+    "No records imported yet for title/abstract screening."
+)
+
+preview_stage(
+    tab2,
+    "Full-text screening",
+    "No records imported yet for full-text screening."
+)
+
+preview_stage(
+    tab3,
+    "Data extraction",
+    "No records imported yet for data extraction."
+)
