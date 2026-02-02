@@ -261,13 +261,27 @@ searches = metadata.get("searches", [])
 if not searches:
     st.info("No searches documented yet.")
 else:
+    # Convert search history to a table-friendly format
+    history_rows = []
+
     for s in searches:
-        with st.expander(f"Imported for {s['import_stage']} — {s['database']}"):
-            st.markdown(f"**Date:** {s['run_date']}")
-            st.markdown(f"**Time window:** {s['search_start_year']}–{s['search_end_year']}")
-            st.markdown("**Search strategy:**")
-            st.markdown(s["search_strategy"])
-            st.markdown(f"**Records added:** {s['records_added']}")
+        history_rows.append({
+            "Stage": s.get("import_stage"),
+            "Database": s.get("database"),
+            "Date": s.get("run_date"),
+            "Coverage": f"{s.get('search_start_year')}–{s.get('search_end_year')}",
+            "Records identified": s.get("records_added"),
+            "Search query (verbatim)": s.get("search_strategy"),
+        })
+
+    df_history = pd.DataFrame(history_rows)
+
+    st.dataframe(
+        df_history,
+        use_container_width=True,
+        hide_index=True
+    )
+
 
 # =========================
 # PROJECT STATUS
