@@ -189,21 +189,10 @@ if database_choice == "pubmed":
 elif database_choice == "openalex":
     st.caption("Structured Boolean search (OpenAlex)")
 
-    title_terms = st.text_input(
-        "Title terms (comma-separated OR)",
-        placeholder="depression, depressive disorder"
+    openalex_query = st.text_input(
+        "Title & Abstract search (OpenAlex syntax)",
+        placeholder='e.g., "sexual assault adolescent"'
     )
-
-    abstract_terms = st.text_input(
-        "Abstract terms (comma-separated OR)",
-        placeholder="adolescent, youth"
-    )
-
-    exclude_terms = st.text_input(
-        "Exclude concepts (comma-separated)",
-        placeholder="animals"
-    )
-
 
 st.caption("📜 Search history")
 
@@ -321,15 +310,15 @@ if st.button("▶ Run Search"):
     # =========================
     elif database_choice == "openalex":
 
-        title_terms_list = [t.strip() for t in title_terms.split(",") if t.strip()]
-        abstract_terms_list = [t.strip() for t in abstract_terms.split(",") if t.strip()]
-        exclude_terms_list = [t.strip() for t in exclude_terms.split(",") if t.strip()]
-
         with st.spinner("🔎 Searching OpenAlex..."):
+            if not openalex_query.strip():
+                st.error("❌ OpenAlex search query cannot be empty.")
+                st.stop()
+
             records, total_hits = search_openalex(
-                title_terms=title_terms_list,
-                abstract_terms=abstract_terms_list,
-                exclude_terms=exclude_terms_list
+                query=openalex_query,
+                start_year=start_year,
+                end_year=end_year
             )
 
         st.success(f"OpenAlex returned {total_hits} records.")

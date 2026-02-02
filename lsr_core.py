@@ -169,22 +169,16 @@ def fetch_pubmed_records_fast(pmids, batch_size=50):
 # =========================
 
 def search_openalex(
-    title_terms,
-    abstract_terms,
-    exclude_terms,
-    per_page=200,
+    query,
+    start_year,
+    end_year,
+    per_page=25,
     max_pages=5
 ):
-    filters = []
-
-    if title_terms:
-        filters.append(f"title.search:{'|'.join(title_terms)}")
-
-    if abstract_terms:
-        filters.append(f"abstract.search:{'|'.join(abstract_terms)}")
-
-    for t in exclude_terms or []:
-        filters.append(f"NOT concepts.display_name:{t}")
+    filters = [
+        f"title_and_abstract.search:{query}",
+        f"publication_year:{start_year}-{end_year}"
+    ]
 
     filter_string = ",".join(filters)
 
@@ -197,6 +191,7 @@ def search_openalex(
             headers=OPENALEX_HEADERS,
             params={
                 "filter": filter_string,
+                "sort": "relevance_score:desc",
                 "per-page": per_page,
                 "cursor": cursor
             },
@@ -215,13 +210,14 @@ def search_openalex(
                 "abstract_source": "openalex",
             })
 
-        cursor = data["meta"]["next_cursor"]
+        cursor = data["meta"].get("next_cursor")
         if not cursor:
             break
 
-        time.sleep(0.3)
+        time.sleep(0.2)
 
     return records, len(records)
+
 
 
 # =========================
