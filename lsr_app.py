@@ -16,11 +16,30 @@ from lsr_core import normalize_and_import_csv
 PROJECT_ROOT = "projects"
 os.makedirs(PROJECT_ROOT, exist_ok=True)
 
+# =========================
+# SYSTEMATIC REVIEW STAGES
+# =========================
+
+STAGES = [
+    "Title/abstract screening",
+    "Full-text screening",
+    "Data extraction"
+]
+
+STAGE_STATUSES = ["Not started", "In progress", "Completed"]
+
+
 def project_path(name):
     return os.path.join(PROJECT_ROOT, name)
 
 def csv_path(name):
     return os.path.join(project_path(name), "data.csv")
+
+def count_rows(path):
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        return len(pd.read_csv(path))
+    return 0
+
 
 def stage_csv_path(project, stage):
     mapping = {
@@ -134,8 +153,90 @@ if not st.session_state.current_project:
 project = st.session_state.current_project
 st.subheader(f"📂 Project: `{project}`")
 
+# -------------------------
+# Load + initialize metadata (MUST COME FIRST)
+# -------------------------
+
 csv_file = csv_path(project)
 metadata = load_metadata(project)
+
+metadata.setdefault("stage_status", {})
+for stage in STAGES:
+    metadata["stage_status"].setdefault(stage, "Not started")
+
+save_metadata(project, metadata)
+
+# =========================
+# PROJECT PROGRESS DASHBOARD
+# =========================
+
+st.subheader("📊 Systematic Review Project Status")
+
+# ---- Load + initialize metadata ----
+metadata = load_metadata(project)
+metadata.setdefault("stage_status", {})
+
+for stage in STAGES:
+    metadata["stage_status"].setdefault(stage, "Not started")
+
+save_metadata(project, metadata)
+
+base_path = project_path(project)
+
+counts = {
+    "Title/abstract screening": count_rows(os.path.join(base_path, "title_abstract.csv")),
+    "Full-text screening": count_rows(os.path.join(base_path, "full_text.csv")),
+    "Data extraction": count_rows(os.path.join(base_path, "data_extraction.csv")),
+}
+
+# ---- Table header ----
+col_stage, col_records, col_status = st.columns([3, 1.2, 4])
+with col_stage:
+    st.markdown("**Stage**")
+with col_records:
+    st.markdown("**Records**")
+with col_status:
+    st.markdown("**Status**")
+
+# ---- Table rows ----
+for stage in STAGES:
+    col_stage, col_records, col_status = st.columns([3, 1.2, 4])
+
+    with col_stage:
+        st.markdown(stage)
+
+    with col_records:
+        st.markdown(str(counts.get(stage, 0)))
+
+    with col_status:
+        status = metadata["stage_status"][stage]
+
+        status_icon = {
+            "Not started": "⚪",
+            "In progress": "🟡",
+            "Completed": "🟢"
+        }[status]
+
+        if st.button(f"{status_icon} {status}", key=f"status_{stage}"):
+            next_status = {
+                "Not started": "In progress",
+                "In progress": "Completed",
+                "Completed": "Not started"
+            }[status]
+
+            metadata["stage_status"][stage] = next_status
+            save_metadata(project, metadata)
+            st.rerun()
+
+# -------------------------
+# Overall progress indicator
+# -------------------------
+
+completed = sum(1 for n in counts.values() if n > 0)
+total_stages = len(counts)
+
+st.progress(completed / total_stages)
+st.caption(f"{completed} of {total_stages} stages have data.")
 
 # =========================
 # SEARCH DOCUMENTATION
