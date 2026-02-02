@@ -1,13 +1,16 @@
-# lsr_app.py
-
 import os
 import shutil
-import json
 import streamlit as st
 import pandas as pd
 from datetime import date
+import json
 
-from lsr_core import normalize_and_import_csv
+from lsr_core import (
+    search_pubmed,
+    fetch_pubmed_records_fast,
+    search_openalex,
+    update_lsr_database
+)
 
 # =========================
 # PATH CONFIG
@@ -22,11 +25,16 @@ def project_path(name):
 def csv_path(name):
     return os.path.join(project_path(name), "data.csv")
 
-def metadata_path(name):
-    return os.path.join(project_path(name), "metadata.json")
+def metadata_path(project):
+    return os.path.join(project_path(project), "metadata.json")
+
+def delete_project(project):
+    path = project_path(project)
+    if os.path.exists(path):
+        shutil.rmtree(path)
 
 # =========================
-# METADATA HELPERS
+# METADATA
 # =========================
 
 def load_metadata(project):
@@ -37,31 +45,15 @@ def load_metadata(project):
     return {}
 
 def save_metadata(project, data):
-    with open(metadata_path(project), "w", encoding="utf-8") as f:
+    path = metadata_path(project)
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
 def list_projects():
-    return sorted(
+    return sorted([
         p for p in os.listdir(PROJECT_ROOT)
         if os.path.isdir(os.path.join(PROJECT_ROOT, p))
-    )
-
-def delete_project(project):
-    shutil.rmtree(project_path(project), ignore_errors=True)
-
-# =========================
-# CSV MIGRATION HELPER
-# =========================
-
-def load_project_csv_with_migration(csv_file):
-    df = pd.read_csv(csv_file)
-
-    # Backward compatibility: search_round → search_id
-    if "search_id" not in df.columns and "search_round" in df.columns:
-        df = df.rename(columns={"search_round": "search_id"})
-        df.to_csv(csv_file, index=False)
-
-    return df
+    ])
 
 # =========================
 # STREAMLIT SETUP
@@ -74,13 +66,7 @@ st.set_page_config(
 
 st.title("📚 Living Systematic Review Manager")
 st.write(
-    "Document, standardize, and track external database searches "
-    "for living systematic reviews."
-)
-
-st.warning(
-    "⚠️ This Streamlit deployment is for demonstration only. "
-    "Uploaded data are not guaranteed to persist."
+    "Manage multiple living systematic reviews from beginning to end."
 )
 
 # =========================
@@ -94,29 +80,75 @@ projects = list_projects()
 if "current_project" not in st.session_state:
     st.session_state.current_project = None
 
+# Existing projects with delete menu
 for p in projects:
     col1, col2 = st.sidebar.columns([0.85, 0.15])
+
     if col1.button(p, key=f"open_{p}"):
         st.session_state.current_project = p
         st.rerun()
-    if col2.button("🗑", key=f"delete_{p}"):
+
+    if col2.button("⋮", key=f"menu_{p}"):
+        st.session_state.project_to_manage = p
+
+# Project management menu
+if "project_to_manage" in st.session_state:
+    p = st.session_state.project_to_manage
+
+    st.sidebar.markdown("---")
+    st.sidebar.warning(f"⚠ Manage project: **{p}**")
+
+    if st.sidebar.button("🗑 Delete project"):
+        st.session_state.confirm_delete = p
+
+    if st.sidebar.button("Cancel"):
+        del st.session_state.project_to_manage
+
+# Delete confirmation
+if "confirm_delete" in st.session_state:
+    p = st.session_state.confirm_delete
+
+    st.sidebar.error(
+        f"❗ This will permanently delete **{p}**.\n\n"
+        "This action cannot be undone."
+    )
+
+    if st.sidebar.button("❌ Yes, permanently delete"):
         delete_project(p)
+
         if st.session_state.current_project == p:
             st.session_state.current_project = None
+
+        del st.session_state.confirm_delete
+        del st.session_state.project_to_manage
+        st.sidebar.success("Project deleted.")
         st.rerun()
+
+    if st.sidebar.button("Cancel deletion"):
+        del st.session_state.confirm_delete
 
 st.sidebar.divider()
 
-new_project = st.sidebar.text_input(
-    "➕ New project name",
-    placeholder="e.g., Living Depression Review"
+# Create new project
+st.sidebar.subheader("➕ New Project")
+
+new_project_name = st.sidebar.text_input(
+    "Project name",
+    placeholder="e.g., Living Systematic Review"
 )
 
-if st.sidebar.button("Create project"):
-    if new_project.strip():
-        os.makedirs(project_path(new_project), exist_ok=True)
-        st.session_state.current_project = new_project
-        st.rerun()
+if st.sidebar.button("Create Project"):
+    if not new_project_name.strip():
+        st.sidebar.error("Please enter a project name.")
+    else:
+        path = project_path(new_project_name)
+        if os.path.exists(path):
+            st.sidebar.error("Project already exists.")
+        else:
+            os.makedirs(path)
+            st.session_state.current_project = new_project_name
+            st.sidebar.success("Project created.")
+            st.rerun()
 
 # =========================
 # MAIN PANEL
@@ -127,60 +159,279 @@ if not st.session_state.current_project:
     st.stop()
 
 project = st.session_state.current_project
-st.subheader(f"📂 Project: `{project}`")
+st.subheader(f"📂 Current Project: `{project}`")
+
+metadata = load_metadata(project)
+query_history = metadata.get("query_history", [])
+last_query = metadata.get("last_query", "")
 
 csv_file = csv_path(project)
-metadata = load_metadata(project)
 
 # =========================
-# SEARCH DOCUMENTATION
+# SEARCH STRATEGY
 # =========================
 
-st.subheader("1️⃣ Register External Search")
+st.subheader("1️⃣ Search Strategy")
 
-database_name = st.text_input(
-    "Database searched",
-    placeholder="PubMed, PsycINFO, Embase, Scopus, etc."
+database_choice = st.selectbox(
+    "Database",
+    ["pubmed", "openalex"]
 )
 
-search_strategy = st.text_area(
-    "Exact search strategy (verbatim from database)",
-    height=120
-)
+
+if database_choice == "pubmed":
+    query = st.text_area(
+        "Paste PubMed query (DO NOT include date limits):",
+        height=220,
+        value=last_query
+    )
+
+elif database_choice == "openalex":
+    st.caption("Structured Boolean search (OpenAlex)")
+
+    openalex_query = st.text_input(
+        "Title & Abstract search (OpenAlex syntax)",
+        placeholder='e.g., "sexual assault adolescent"'
+    )
+
+st.caption("📜 Search history")
+
+if query_history:
+    selected_query = st.selectbox(
+        "Previous PubMed queries",
+        options=["(Select a previous query)"] + query_history
+    )
+    if selected_query != "(Select a previous query)":
+        query = selected_query
+else:
+    st.info("No previous searches for this project yet.")
+
+# ---- DOWNLOAD PUBMED SEARCH STRATEGY ----
+if last_query:
+    pubmed_search_txt = (
+        f"Database: PubMed\n"
+        f"Search date: {metadata.get('last_run_date', 'NA')}\n"
+        f"Time window: {metadata.get('last_search_start_year', 'NA')}–"
+        f"{metadata.get('last_search_end_year', 'NA')}\n\n"
+        f"Search strategy:\n{last_query}"
+    )
+
+    st.download_button(
+        label="⬇ Download PubMed search strategy (.txt)",
+        data=pubmed_search_txt,
+        file_name=f"{project}_pubmed_search.txt",
+        mime="text/plain",
+    )
+
+# =========================
+# TIME WINDOW
+# =========================
+
+st.subheader("2️⃣ Time Window")
 
 c1, c2 = st.columns(2)
+
 with c1:
-    search_start_year = st.number_input(
-        "Search start year",
+    start_year = st.number_input(
+        "Start year",
         min_value=1900,
         max_value=date.today().year,
-        value=2000
+        value=metadata.get("last_search_start_year", 2000),
+        step=1
     )
+
 with c2:
-    search_end_year = st.number_input(
-        "Search end year",
+    end_year = st.number_input(
+        "End year",
         min_value=1900,
         max_value=date.today().year,
-        value=date.today().year
+        value=metadata.get("last_search_end_year", date.today().year),
+        step=1
     )
 
 # =========================
-# CSV UPLOAD
+# RUN SEARCH
 # =========================
 
-st.subheader("2️⃣ Upload Search Results (CSV)")
+st.subheader("3️⃣ Run Search")
 
-uploaded_csv = st.file_uploader(
-    "Upload CSV exported directly from the database",
-    type=["csv"]
-)
+if st.button("▶ Run Search"):
 
-if uploaded_csv and st.button("📥 Import records"):
-
-    if not database_name.strip() or not search_strategy.strip():
-        st.error("Database name and search strategy are required.")
+    if start_year > end_year:
+        st.error("❌ Start year must be earlier than or equal to end year.")
         st.stop()
 
+    # =========================
+    # PUBMED SEARCH
+    # =========================
+    if database_choice == "pubmed":
+
+        if not query.strip():
+            st.error("❌ Search query cannot be empty.")
+            st.stop()
+
+        if query not in query_history:
+            query_history.append(query)
+
+        metadata.setdefault("pubmed_searches", []).append({
+            "database": "pubmed",
+            "search_strategy": query,
+            "search_start_year": start_year,
+            "search_end_year": end_year,
+            "run_date": pd.Timestamp.today().strftime("%Y-%m-%d"),
+        })
+
+        save_metadata(project, metadata)
+
+        with st.spinner("🔎 Searching PubMed..."):
+            pmids, total_hits = search_pubmed(
+                query,
+                retmax=100,
+                start_year=start_year,
+                end_year=end_year
+            )
+
+        st.success(f"PubMed returned {total_hits} total hits.")
+        st.write(f"PMIDs retrieved in this run: **{len(pmids)}**")
+
+        with st.spinner("📥 Fetching abstracts (XML → PIP fallback)..."):
+            records = fetch_pubmed_records_fast(pmids)
+
+        with st.spinner("🧠 Updating project database..."):
+            update_lsr_database(
+                records,
+                project_csv=csv_file,
+                search_start_year=start_year,
+                search_end_year=end_year
+            )
+
+    # =========================
+    # OPENALEX SEARCH
+    # =========================
+    elif database_choice == "openalex":
+
+        with st.spinner("🔎 Searching OpenAlex..."):
+            if not openalex_query.strip():
+                st.error("❌ OpenAlex search query cannot be empty.")
+                st.stop()
+
+            records, total_hits = search_openalex(
+                query=openalex_query,
+                start_year=start_year,
+                end_year=end_year
+            )
+
+        st.success(f"OpenAlex returned {total_hits} records.")
+
+        with st.spinner("🧠 Updating project database..."):
+            update_lsr_database(
+                records,
+                project_csv=csv_file,
+                search_start_year=start_year,
+                search_end_year=end_year
+            )
+
+    st.success("🎉 Search completed successfully.")
+    st.rerun()
+
+
+# =========================
+# PUBMED SEARCH HISTORY
+# =========================
+
+st.subheader("📜 PubMed Search History")
+
+pubmed_history = metadata.get("pubmed_searches", [])
+
+if not pubmed_history:
+    st.info("No PubMed searches recorded yet.")
+else:
+    for i, entry in enumerate(pubmed_history, start=1):
+        with st.expander(f"PubMed Search #{i} — {entry['run_date']}"):
+            txt = (
+                f"Database: PubMed\n"
+                f"Search date: {entry['run_date']}\n"
+                f"Time window: {entry['search_start_year']}–"
+                f"{entry['search_end_year']}\n\n"
+                f"Search strategy:\n{entry['search_strategy']}"
+            )
+
+            st.markdown(f"**Database:** PubMed")
+            st.markdown(f"**Search date:** {entry['run_date']}")
+            st.markdown(
+                f"**Time window:** {entry['search_start_year']}–{entry['search_end_year']}"
+            )
+            st.markdown("**Search strategy:**")
+            st.markdown(entry["search_strategy"])
+
+            st.download_button(
+                label="⬇ Download search strategy (.txt)",
+                data=txt,
+                file_name=f"{project}_pubmed_search_{i}.txt",
+                mime="text/plain",
+            )
+
+# =========================
+# MANUAL CSV IMPORT
+# =========================
+
+from lsr_core import normalize_and_import_csv
+
+st.subheader("📥 Manual Import (Licensed Databases)")
+
+st.caption(
+    "Upload CSV files exported from PsycINFO, Embase, Scopus, etc. "
+    "Search strategies must be provided for transparency."
+)
+# ---- SELECT DATABASE SOURCE ----
+database_name = st.selectbox(
+    "Source database",
+    options=[
+        "psycinfo",
+        "embase",
+        "scopus",
+        "web_of_science",
+        "other"
+    ]
+)
+# ---- Search strategy ----
+manual_search_terms = st.text_area(
+    "Search strategy (e.g., MeSH or database syntax)",
+    height=120,
+    placeholder='(MH "Depression") AND (MH "Cognitive Behavioral Therapy")'
+)
+
+# ---- Time window ----
+c1, c2 = st.columns(2)
+with c1:
+    manual_start_year = st.number_input(
+        "Search start year (manual import)",
+        min_value=1900,
+        max_value=date.today().year,
+        value=metadata.get("last_manual_start_year", 2000),
+    )
+with c2:
+    manual_end_year = st.number_input(
+        "Search end year (manual import)",
+        min_value=1900,
+        max_value=date.today().year,
+        value=metadata.get("last_manual_end_year", date.today().year),
+    )
+
+# ---- CSV upload ----
+uploaded_csv = st.file_uploader(
+    "Upload CSV file",
+    type=["csv"],
+    key="manual_csv_upload"
+)
+
+if uploaded_csv and st.button("📤 Import CSV into project"):
+
+    if not manual_search_terms.strip():
+        st.error("Please enter the search strategy used.")
+        st.stop()
+
+    # ---------- SAFE CSV READ (handle encoding + streamlit file pointer) ----------
     try:
         uploaded_csv.seek(0)
         df_upload = pd.read_csv(uploaded_csv, encoding="utf-8")
@@ -188,109 +439,211 @@ if uploaded_csv and st.button("📥 Import records"):
         uploaded_csv.seek(0)
         df_upload = pd.read_csv(uploaded_csv, encoding="latin-1")
 
-    # ---- COLUMN NORMALIZATION ----
-    def norm(c): return c.lower().replace(" ", "").replace("_", "")
 
-    colmap = {norm(c): c for c in df_upload.columns}
+    # ---------- FLEXIBLE COLUMN DETECTION & STANDARDIZATION ----------
 
-    title_col = next((colmap[c] for c in colmap if c in {"title","articletitle","documenttitle","ti"}), None)
-    abstract_col = next((colmap[c] for c in colmap if c in {"abstract","ab","summary","description"}), None)
-    journal_col = next((colmap[c] for c in colmap if c in {"journal","source","publicationname","so"}), None)
-    year_col = next((colmap[c] for c in colmap if c in {"year","py","publicationyear"}), None)
+    def normalize_colname(c):
+        return c.lower().replace(" ", "").replace("_", "")
 
+
+    normalized_cols = {
+        normalize_colname(c): c for c in df_upload.columns
+    }
+
+    # ---- Aliases ----
+    TITLE_ALIASES = {
+        "title",
+        "documenttitle",
+        "articletitle",
+        "ti",
+    }
+
+    ABSTRACT_ALIASES = {
+        "abstract",
+        "abastract",  # PsycINFO typo
+        "ab",
+        "summary",
+        "description",
+    }
+
+    JOURNAL_ALIASES = {
+        "journal",
+        "publicationname",
+        "source",
+        "so",
+    }
+
+    YEAR_ALIASES = {
+        "year",
+        "publicationyear",
+        "py",
+    }
+
+    # ---- Detect columns ----
+    title_col = None
+    abstract_col = None
+    journal_col = None
+    year_col = None
+
+    for key, original in normalized_cols.items():
+        if key in TITLE_ALIASES:
+            title_col = original
+        elif key in ABSTRACT_ALIASES:
+            abstract_col = original
+        elif key in JOURNAL_ALIASES:
+            journal_col = original
+        elif key in YEAR_ALIASES:
+            year_col = original
+
+    # ---- Validate required fields ----
     if not title_col or not abstract_col:
-        st.error("CSV must contain title and abstract columns.")
+        st.error(
+            "Could not detect required title and abstract columns.\n\n"
+            f"Detected columns: {list(df_upload.columns)}\n\n"
+            "Ensure the CSV includes title and abstract fields."
+        )
         st.stop()
 
-    rename = {
+    # ---- Standardize column names ----
+    rename_map = {
         title_col: "title",
-        abstract_col: "abstract"
+        abstract_col: "abstract",
     }
+
     if journal_col:
-        rename[journal_col] = "journal"
+        rename_map[journal_col] = "journal"
+
     if year_col:
-        rename[year_col] = "year"
+        rename_map[year_col] = "year"
 
-    df_upload = df_upload.rename(columns=rename)
+    df_upload = df_upload.rename(columns=rename_map)
 
-    for col in ["journal", "year"]:
-        if col not in df_upload.columns:
-            df_upload[col] = None
+    # ---- Ensure optional columns exist ----
+    if "journal" not in df_upload.columns:
+        df_upload["journal"] = None
 
-    added, search_id = normalize_and_import_csv(
+    if "year" not in df_upload.columns:
+        df_upload["year"] = None
+
+    added, round_num = normalize_and_import_csv(
         uploaded_df=df_upload,
         project_csv=csv_file,
         database_name=database_name,
-        search_start_year=search_start_year,
-        search_end_year=search_end_year,
+        search_start_year=manual_start_year,
+        search_end_year=manual_end_year,
     )
 
-    metadata.setdefault("searches", []).append({
+    # ---- SAVE METADATA ----
+    metadata.setdefault("manual_imports", []).append({
         "database": database_name,
-        "search_strategy": search_strategy,
-        "search_start_year": search_start_year,
-        "search_end_year": search_end_year,
+        "search_strategy": manual_search_terms,
+        "search_start_year": manual_start_year,
+        "search_end_year": manual_end_year,
         "run_date": date.today().isoformat(),
         "records_added": added,
-        "search_id": search_id
     })
+
+    metadata["last_manual_start_year"] = manual_start_year
+    metadata["last_manual_end_year"] = manual_end_year
 
     save_metadata(project, metadata)
 
-    st.success(f"Imported {added} new records (search {search_id}).")
+    st.success(
+        f"Manual import completed. Added {added} new records "
+        f"(search round {round_num})."
+    )
+
     st.rerun()
 
 # =========================
-# SEARCH HISTORY
+# MANUAL IMPORT HISTORY
 # =========================
 
-st.subheader("📜 Search History")
+st.subheader("📜 Manual Import History")
 
-searches = metadata.get("searches", [])
+manual_history = metadata.get("manual_imports", [])
 
-if not searches:
-    st.info("No searches documented yet.")
+if not manual_history:
+    st.info("No manual imports yet.")
 else:
-    for s in searches:
-        with st.expander(f"Search {s['search_id']} — {s['database']}"):
-            st.markdown(f"**Date:** {s['run_date']}")
-            st.markdown(f"**Time window:** {s['search_start_year']}–{s['search_end_year']}")
+    for i, entry in enumerate(manual_history, start=1):
+        with st.expander(f"Manual Import #{i} — {entry['run_date']}"):
+            st.markdown(f"**Database:** {entry.get('database', 'manual')}")
+            st.markdown(f"**Search date:** {entry['run_date']}")
+            st.markdown(
+                f"**Time window:** {entry['search_start_year']}–{entry['search_end_year']}"
+            )
+
             st.markdown("**Search strategy:**")
-            st.markdown(s["search_strategy"])
-            st.markdown(f"**Records added:** {s['records_added']}")
+            st.markdown(entry["search_strategy"])
+
+            st.markdown(f"**Records added:** {entry['records_added']}")
+
+            manual_txt = (
+                f"Database: {entry.get('database', 'manual')}\n"
+                f"Search date: {entry['run_date']}\n"
+                f"Time window: {entry['search_start_year']}–"
+                f"{entry['search_end_year']}\n\n"
+                f"Search strategy:\n{entry['search_strategy']}"
+            )
+
+            st.download_button(
+                label="⬇ Download search strategy (.txt)",
+                data=manual_txt,
+                file_name=f"{project}_manual_search_{i}.txt",
+                mime="text/plain",
+            )
 
 # =========================
 # PROJECT STATUS
 # =========================
 
-st.subheader("3️⃣ Project Status")
+st.subheader("4️⃣ Project Status")
 
 if os.path.exists(csv_file) and os.path.getsize(csv_file) > 0:
-    df = load_project_csv_with_migration(csv_file)
+    try:
+        df = pd.read_csv(csv_file)
 
-    st.write(
-        f"**Total records:** {len(df)}  \n"
-        f"**Searches conducted:** {df['search_id'].max()}"
-    )
+        st.write(
+            f"**Total records:** {len(df)}  \n"
+            f"**Search rounds:** {df['search_round'].max()}"
+        )
 
-    st.download_button(
-        "⬇ Download standardized dataset",
-        df.to_csv(index=False),
-        file_name=f"{project}_lsr.csv",
-        mime="text/csv"
-    )
+        st.download_button(
+            "⬇ Download Project CSV",
+            df.to_csv(index=False),
+            file_name=f"{project}_lsr.csv",
+            mime="text/csv"
+        )
+    except pd.errors.EmptyDataError:
+        st.info("This project exists but has no records yet.")
 else:
-    st.info("No records imported yet.")
+    st.info("This project has no records yet.")
 
 # =========================
 # RECORD PREVIEW
 # =========================
 
-st.subheader("4️⃣ Record Preview")
+st.subheader("5️⃣ Record Preview")
 
 if os.path.exists(csv_file) and os.path.getsize(csv_file) > 0:
-    st.dataframe(
-        df.head(50),
-        use_container_width=True,
-        height=400
-    )
+    try:
+        df = pd.read_csv(csv_file)
+
+        preview_cols = [
+            "database", "title", "journal", "year",
+            "abstract", "search_round", "run_date"
+        ]
+        cols = [c for c in preview_cols if c in df.columns]
+
+        st.caption(f"Showing first 50 records (out of {len(df)})")
+
+        st.dataframe(
+            df[cols].head(50),
+            use_container_width=True,
+            height=400
+        )
+    except pd.errors.EmptyDataError:
+        st.info("No records to preview yet.")
+else:
+    st.info("No records to preview yet.")
