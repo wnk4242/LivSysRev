@@ -136,16 +136,26 @@ metadata = load_metadata(project)
 # SEARCH DOCUMENTATION
 # =========================
 
-st.subheader("1️⃣ Register External Search")
+st.subheader("1️⃣ Register Reference Search")
 
 database_name = st.text_input(
-    "Database searched",
-    placeholder="PubMed, PsycINFO, Embase, Scopus, etc."
+    "Enter a database searched",
+    placeholder="e.g., PubMed",
+    help="Enter one database name at a time."
 )
 
 search_strategy = st.text_area(
-    "Exact search strategy (verbatim from database)",
+    "Enter the search query you used (verbatim)",
     height=120
+)
+
+csv_purpose = st.selectbox(
+    "This CSV is imported for:",
+    [
+        "Title/abstract screening",
+        "Full-text screening",
+        "Data extraction"
+    ]
 )
 
 c1, c2 = st.columns(2)
@@ -232,7 +242,7 @@ if uploaded_csv and st.button("📥 Import records"):
         "search_end_year": search_end_year,
         "run_date": date.today().isoformat(),
         "records_added": added,
-        "search_id": search_id
+        "import_stage": csv_purpose
     })
 
     save_metadata(project, metadata)
@@ -244,7 +254,7 @@ if uploaded_csv and st.button("📥 Import records"):
 # SEARCH HISTORY
 # =========================
 
-st.subheader("📜 Search History")
+st.subheader("📜 Reference Search History")
 
 searches = metadata.get("searches", [])
 
@@ -252,7 +262,7 @@ if not searches:
     st.info("No searches documented yet.")
 else:
     for s in searches:
-        with st.expander(f"Search {s['search_id']} — {s['database']}"):
+        with st.expander(f"Imported for {s['import_stage']} — {s['database']}"):
             st.markdown(f"**Date:** {s['run_date']}")
             st.markdown(f"**Time window:** {s['search_start_year']}–{s['search_end_year']}")
             st.markdown("**Search strategy:**")
