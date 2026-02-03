@@ -234,6 +234,157 @@ for stage in STAGES:
 
 
 # =========================
+# STUDY IDENTIFICATION (LIVING DOCUMENT)
+# =========================
+
+st.subheader("📘 Study Identification")
+
+metadata = load_metadata(project)
+study_id = metadata.setdefault("study_identification", {})
+history = study_id.setdefault("history", [])
+current = study_id.setdefault("current", {})
+
+with st.expander("Edit study identification (living document)", expanded=not bool(current)):
+
+    title = st.text_input(
+        "Working review title",
+        value=current.get("title", "")
+    )
+
+    research_question = st.text_area(
+        "Primary research question",
+        value=current.get("research_question", ""),
+        height=80
+    )
+
+    population = st.text_input(
+        "Population",
+        value=current.get("population", "")
+    )
+
+    intervention = st.text_input(
+        "Intervention / Exposure",
+        value=current.get("intervention", "")
+    )
+
+    comparator = st.text_input(
+        "Comparator (if applicable)",
+        value=current.get("comparator", "")
+    )
+
+    outcomes = st.text_input(
+        "Outcome(s)",
+        value=current.get("outcomes", "")
+    )
+
+    study_designs = st.text_input(
+        "Study designs included",
+        value=current.get("study_designs", "")
+    )
+
+    inclusion = st.text_area(
+        "Inclusion criteria",
+        value=current.get("inclusion", ""),
+        height=120
+    )
+
+    exclusion = st.text_area(
+        "Exclusion criteria",
+        value=current.get("exclusion", ""),
+        height=120
+    )
+
+    notes = st.text_area(
+        "Notes / rationale (optional)",
+        value=current.get("notes", ""),
+        height=100
+    )
+
+    # ---- Buttons row (INSIDE expander) ----
+    col_save, col_download = st.columns([1, 1])
+
+    with col_save:
+        if st.button("💾 Save new version"):
+            new_version = len(history) + 1
+            snapshot = {
+                "version": new_version,
+                "saved_at": date.today().isoformat(),
+                "data": {
+                    "title": title,
+                    "research_question": research_question,
+                    "population": population,
+                    "intervention": intervention,
+                    "comparator": comparator,
+                    "outcomes": outcomes,
+                    "study_designs": study_designs,
+                    "inclusion": inclusion,
+                    "exclusion": exclusion,
+                    "notes": notes,
+                }
+            }
+
+            history.append(snapshot)
+            study_id["current"] = snapshot["data"]
+            save_metadata(project, metadata)
+            st.success(f"Saved version v{new_version}")
+            st.rerun()
+
+    with col_download:
+        if study_id.get("current"):
+            current_data = study_id["current"]
+            version_num = len(history)
+            last_updated = history[-1]["saved_at"]
+
+            export_text = f"""Study Identification & Review Framing
+=================================
+
+Working review title:
+{current_data.get("title", "")}
+
+Primary research question:
+{current_data.get("research_question", "")}
+
+Population:
+{current_data.get("population", "")}
+
+Intervention / Exposure:
+{current_data.get("intervention", "")}
+
+Comparator:
+{current_data.get("comparator", "")}
+
+Outcome(s):
+{current_data.get("outcomes", "")}
+
+Study designs included:
+{current_data.get("study_designs", "")}
+
+---------------------------------
+Inclusion criteria:
+{current_data.get("inclusion", "")}
+
+---------------------------------
+Exclusion criteria:
+{current_data.get("exclusion", "")}
+
+---------------------------------
+Notes / rationale:
+{current_data.get("notes", "")}
+
+---------------------------------
+Version: v{version_num}
+Last updated: {last_updated}
+"""
+
+            st.download_button(
+                label="⬇ Download (TXT)",
+                data=export_text,
+                file_name=f"{project}_study_identification_v{version_num}.txt",
+                mime="text/plain"
+            )
+
+
+# =========================
 # SEARCH DOCUMENTATION
 # =========================
 
