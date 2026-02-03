@@ -229,21 +229,12 @@ for stage in STAGES:
             save_metadata(project, metadata)
             st.rerun()
 
-# -------------------------
-# Overall progress indicator
-# -------------------------
-
-completed = sum(1 for n in counts.values() if n > 0)
-total_stages = len(counts)
-
-st.progress(completed / total_stages)
-st.caption(f"{completed} of {total_stages} stages have data.")
 
 # =========================
 # SEARCH DOCUMENTATION
 # =========================
 
-st.subheader("1️⃣ Register Reference Search")
+st.subheader("Register Reference Search")
 
 database_name = st.text_input(
     "Enter a database searched",
@@ -285,7 +276,7 @@ with c2:
 # CSV UPLOAD
 # =========================
 
-st.subheader("2️⃣ Upload Search Results (CSV)")
+st.subheader("Upload Search Results (CSV)")
 
 uploaded_csv = st.file_uploader(
     "Upload CSV exported directly from the database",
@@ -393,7 +384,7 @@ else:
     )
 
 
-st.subheader("3️⃣ Record Preview by Screening Stage")
+st.subheader("Record Preview by Screening Stage")
 
 tab1, tab2, tab3 = st.tabs([
     "Title/Abstract Screening",
