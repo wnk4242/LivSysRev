@@ -207,7 +207,10 @@ for stage in STAGES:
         st.markdown(stage)
 
     with col_records:
-        st.markdown(str(counts.get(stage, 0)))
+        if stage == "Study identification":
+            st.markdown("—")  # or "NA"
+        else:
+            st.markdown(str(counts.get(stage, 0)))
 
     with col_status:
         status = metadata["stage_status"][stage]
