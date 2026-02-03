@@ -21,6 +21,7 @@ os.makedirs(PROJECT_ROOT, exist_ok=True)
 # =========================
 
 STAGES = [
+    "Study identification",
     "Title/abstract screening",
     "Full-text screening",
     "Data extraction"
@@ -392,31 +393,7 @@ else:
     )
 
 
-# =========================
-# PROJECT STATUS
-# =========================
-
-st.subheader("3️⃣ Project Status")
-
-if os.path.exists(csv_file) and os.path.getsize(csv_file) > 0:
-    df = load_project_csv_with_migration(csv_file)
-
-    st.write(
-        f"**Total records:** {len(df)}  \n"
-        f"**Searches conducted:** {df['search_id'].max()}"
-    )
-
-    st.download_button(
-        "⬇ Download standardized dataset",
-        df.to_csv(index=False),
-        file_name=f"{project}_lsr.csv",
-        mime="text/csv"
-    )
-else:
-    st.info("No records imported yet.")
-
-
-st.subheader("4️⃣ Record Preview by Screening Stage")
+st.subheader("3️⃣ Record Preview by Screening Stage")
 
 tab1, tab2, tab3 = st.tabs([
     "Title/Abstract Screening",
@@ -454,3 +431,20 @@ preview_stage(
     "Data extraction",
     "No records imported yet for data extraction."
 )
+# -------------------------
+# Download standardized dataset
+# -------------------------
+
+st.divider()
+
+csv_file = csv_path(project)
+
+if os.path.exists(csv_file) and os.path.getsize(csv_file) > 0:
+    df_all = pd.read_csv(csv_file)
+
+    st.download_button(
+        "⬇ Download standardized dataset",
+        df_all.to_csv(index=False),
+        file_name=f"{project}_standardized_records.csv",
+        mime="text/csv"
+    )
