@@ -104,7 +104,7 @@ st.set_page_config(
 
 st.title("📚 Living Systematic Review Manager")
 st.write(
-    "Document, standardize, and track external database searches "
+    "Document, standardize, and track database searches "
     "for living systematic reviews."
 )
 
