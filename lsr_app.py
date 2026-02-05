@@ -388,122 +388,120 @@ Last updated: {last_updated}
 # SEARCH DOCUMENTATION
 # =========================
 
-st.subheader("Register Reference Search")
+st.subheader("🔎 Reference Searches")
 
-database_name = st.text_input(
-    "Enter a database searched",
-    placeholder="e.g., PubMed",
-    help="Enter one database name at a time."
-)
+with st.expander("Register reference search", expanded=False):
 
-search_strategy = st.text_area(
-    "Enter the search query you used (verbatim)",
-    height=120
-)
-
-csv_purpose = st.selectbox(
-    "This CSV is imported for:",
-    [
-        "Title/abstract screening",
-        "Full-text screening",
-        "Data extraction"
-    ]
-)
-
-c1, c2 = st.columns(2)
-with c1:
-    search_start_year = st.number_input(
-        "Search start year",
-        min_value=1900,
-        max_value=date.today().year,
-        value=2000
-    )
-with c2:
-    search_end_year = st.number_input(
-        "Search end year",
-        min_value=1900,
-        max_value=date.today().year,
-        value=date.today().year
+    database_name = st.text_input(
+        "Enter a database searched",
+        placeholder="e.g., PubMed",
+        help="Enter one database name at a time."
     )
 
-# =========================
-# CSV UPLOAD
-# =========================
-
-st.subheader("Upload Search Results (CSV)")
-
-uploaded_csv = st.file_uploader(
-    "Upload CSV exported directly from the database",
-    type=["csv"]
-)
-
-if uploaded_csv and st.button("📥 Import and register records"):
-
-    if not database_name.strip() or not search_strategy.strip():
-        st.error("Database name and search strategy are required.")
-        st.stop()
-
-    try:
-        uploaded_csv.seek(0)
-        df_upload = pd.read_csv(uploaded_csv, encoding="utf-8")
-    except UnicodeDecodeError:
-        uploaded_csv.seek(0)
-        df_upload = pd.read_csv(uploaded_csv, encoding="latin-1")
-
-    # Save stage-specific dataset for preview
-    df_upload.to_csv(stage_csv_path(project, csv_purpose), index=False)
-
-    # ---- COLUMN NORMALIZATION ----
-    def norm(c): return c.lower().replace(" ", "").replace("_", "")
-
-    colmap = {norm(c): c for c in df_upload.columns}
-
-    title_col = next((colmap[c] for c in colmap if c in {"title","articletitle","documenttitle","ti"}), None)
-    abstract_col = next((colmap[c] for c in colmap if c in {"abstract","ab","summary","description"}), None)
-    journal_col = next((colmap[c] for c in colmap if c in {"journal","source","publicationname","so"}), None)
-    year_col = next((colmap[c] for c in colmap if c in {"year","py","publicationyear"}), None)
-
-    if not title_col or not abstract_col:
-        st.error("CSV must contain title and abstract columns.")
-        st.stop()
-
-    rename = {
-        title_col: "title",
-        abstract_col: "abstract"
-    }
-    if journal_col:
-        rename[journal_col] = "journal"
-    if year_col:
-        rename[year_col] = "year"
-
-    df_upload = df_upload.rename(columns=rename)
-
-    for col in ["journal", "year"]:
-        if col not in df_upload.columns:
-            df_upload[col] = None
-
-    added, search_id = normalize_and_import_csv(
-        uploaded_df=df_upload,
-        project_csv=csv_file,
-        database_name=database_name,
-        search_start_year=search_start_year,
-        search_end_year=search_end_year,
+    search_strategy = st.text_area(
+        "Enter the search query you used (verbatim)",
+        height=120
     )
 
-    metadata.setdefault("searches", []).append({
-        "database": database_name,
-        "search_strategy": search_strategy,
-        "search_start_year": search_start_year,
-        "search_end_year": search_end_year,
-        "run_date": date.today().isoformat(),
-        "records_added": added,
-        "import_stage": csv_purpose
-    })
+    csv_purpose = st.selectbox(
+        "This CSV is imported for:",
+        [
+            "Title/abstract screening",
+            "Full-text screening",
+            "Data extraction"
+        ]
+    )
 
-    save_metadata(project, metadata)
+    c1, c2 = st.columns(2)
+    with c1:
+        search_start_year = st.number_input(
+            "Search start year",
+            min_value=1900,
+            max_value=date.today().year,
+            value=2000
+        )
+    with c2:
+        search_end_year = st.number_input(
+            "Search end year",
+            min_value=1900,
+            max_value=date.today().year,
+            value=date.today().year
+        )
 
-    st.success(f"Imported {added} new records (search {search_id}).")
-    st.rerun()
+    st.markdown("### Upload search results (CSV)")
+
+    uploaded_csv = st.file_uploader(
+        "Upload CSV exported directly from the database",
+        type=["csv"]
+    )
+
+    if uploaded_csv and st.button("📥 Import and register records"):
+        if not database_name.strip() or not search_strategy.strip():
+            st.error("Database name and search strategy are required.")
+            st.stop()
+
+        try:
+            uploaded_csv.seek(0)
+            df_upload = pd.read_csv(uploaded_csv, encoding="utf-8")
+        except UnicodeDecodeError:
+            uploaded_csv.seek(0)
+            df_upload = pd.read_csv(uploaded_csv, encoding="latin-1")
+
+        # Save stage-specific dataset for preview
+        df_upload.to_csv(stage_csv_path(project, csv_purpose), index=False)
+
+        # ---- COLUMN NORMALIZATION ----
+        def norm(c): return c.lower().replace(" ", "").replace("_", "")
+
+        colmap = {norm(c): c for c in df_upload.columns}
+
+        title_col = next((colmap[c] for c in colmap if c in {"title","articletitle","documenttitle","ti"}), None)
+        abstract_col = next((colmap[c] for c in colmap if c in {"abstract","ab","summary","description"}), None)
+        journal_col = next((colmap[c] for c in colmap if c in {"journal","source","publicationname","so"}), None)
+        year_col = next((colmap[c] for c in colmap if c in {"year","py","publicationyear"}), None)
+
+        if not title_col or not abstract_col:
+            st.error("CSV must contain title and abstract columns.")
+            st.stop()
+
+        rename = {
+            title_col: "title",
+            abstract_col: "abstract"
+        }
+        if journal_col:
+            rename[journal_col] = "journal"
+        if year_col:
+            rename[year_col] = "year"
+
+        df_upload = df_upload.rename(columns=rename)
+
+        for col in ["journal", "year"]:
+            if col not in df_upload.columns:
+                df_upload[col] = None
+
+        added, search_id = normalize_and_import_csv(
+            uploaded_df=df_upload,
+            project_csv=csv_file,
+            database_name=database_name,
+            search_start_year=search_start_year,
+            search_end_year=search_end_year,
+        )
+
+        metadata.setdefault("searches", []).append({
+            "database": database_name,
+            "search_strategy": search_strategy,
+            "search_start_year": search_start_year,
+            "search_end_year": search_end_year,
+            "run_date": date.today().isoformat(),
+            "records_added": added,
+            "import_stage": csv_purpose
+        })
+
+        save_metadata(project, metadata)
+
+        st.success(f"Imported {added} new records (search {search_id}).")
+        st.rerun()
+
 
 # =========================
 # SEARCH HISTORY
@@ -538,7 +536,7 @@ else:
     )
 
 
-st.subheader("Record Preview by Screening Stage")
+st.subheader("🗐 Record Preview by Screening Stage")
 
 tab1, tab2, tab3 = st.tabs([
     "Title/Abstract Screening",
@@ -579,8 +577,6 @@ preview_stage(
 # -------------------------
 # Download standardized dataset
 # -------------------------
-
-st.divider()
 
 csv_file = csv_path(project)
 
