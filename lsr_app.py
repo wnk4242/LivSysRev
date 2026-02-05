@@ -17,25 +17,13 @@ if "show_schema_dialog" not in st.session_state:
 if "uploaded_df_temp" not in st.session_state:
     st.session_state.uploaded_df_temp = None
 
-import uuid
-
-def get_workspace_id():
-    params = st.query_params
-    if "workspace" not in params:
-        new_id = "workspace_" + uuid.uuid4().hex[:8]
-        st.query_params["workspace"] = new_id
-        return new_id
-    return params["workspace"]
 
 # =========================
 # PATH CONFIG
 # =========================
 
-WORKSPACE_ID = get_workspace_id()
-
-PROJECT_ROOT = os.path.join("projects", WORKSPACE_ID)
+PROJECT_ROOT = "projects"
 os.makedirs(PROJECT_ROOT, exist_ok=True)
-
 
 # =========================
 # SYSTEMATIC REVIEW STAGES
