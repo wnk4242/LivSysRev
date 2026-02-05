@@ -7,12 +7,17 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 
-from lsr_core import (
-    normalize_and_import_csv,
-    resolve_bibliographic_columns
-)
+from lsr_core import normalize_and_import_csv
 
 import plotly.graph_objects as go
+
+if "show_schema_dialog" not in st.session_state:
+    st.session_state.show_schema_dialog = False
+
+if "uploaded_df_temp" not in st.session_state:
+    st.session_state.uploaded_df_temp = None
+
+
 # =========================
 # PATH CONFIG
 # =========================
@@ -485,10 +490,6 @@ with st.expander("Register reference search", expanded=False):
     )
 
     if uploaded_csv and st.button("📥 Import and register records"):
-        if not database_name.strip() or not search_strategy.strip():
-            st.error("Database name and search strategy are required.")
-            st.stop()
-
         try:
             uploaded_csv.seek(0)
             df_upload = pd.read_csv(uploaded_csv, encoding="utf-8")
@@ -496,99 +497,139 @@ with st.expander("Register reference search", expanded=False):
             uploaded_csv.seek(0)
             df_upload = pd.read_csv(uploaded_csv, encoding="latin-1")
 
-        # Save stage-specific dataset for preview
-        df_upload.to_csv(stage_csv_path(project, csv_purpose), index=False)
+        # store temporarily
+        st.session_state.uploaded_df_temp = df_upload
+        st.session_state.show_schema_dialog = True
 
-        # ---- COLUMN DETECTION ----
-        colmap = resolve_bibliographic_columns(df_upload)
-
-        st.markdown("### 🔍 Detected bibliographic fields")
-
-        preview_rows = []
-        for field in ["title", "abstract", "journal", "year"]:
-            preview_rows.append({
-                "Canonical field": field,
-                "Detected column": colmap[field] or "❌ Not detected"
-            })
-
-        st.table(pd.DataFrame(preview_rows))
-
-        # ---- MANUAL OVERRIDE ----
-        st.markdown("### 🛠 Manual column override (if needed)")
-
-        available_columns = ["— None —"] + list(df_upload.columns)
-        override = {}
-
-        for field in ["title", "abstract", "journal", "year"]:
-            override[field] = st.selectbox(
-                f"{field.capitalize()} column",
-                options=available_columns,
-                index=(
-                    available_columns.index(colmap[field])
-                    if colmap[field] in available_columns
-                    else 0
-                ),
-                key=f"override_{field}"
-            )
-
-
-        def resolve_final(auto, manual):
-            if manual and manual != "— None —":
-                return manual
-            return auto
-
-
-        title_col = resolve_final(colmap["title"], override["title"])
-        abstract_col = resolve_final(colmap["abstract"], override["abstract"])
-        journal_col = resolve_final(colmap["journal"], override["journal"])
-        year_col = resolve_final(colmap["year"], override["year"])
-
-        # ---- VALIDATION ----
-        if not title_col:
-            st.error("A title column is required to import records.")
+        if not database_name.strip() or not search_strategy.strip():
+            st.error("Database name and search strategy are required.")
             st.stop()
 
-        if not abstract_col:
-            st.warning("No abstract column selected. Records will be imported without abstracts.")
+if st.session_state.show_schema_dialog and st.session_state.uploaded_df_temp is not None:
 
-        # ---- RENAME ----
-        rename = {title_col: "title"}
+    st.markdown("---")
+    st.subheader("🧩 Map CSV columns to standardized fields")
 
-        if abstract_col:
-            rename[abstract_col] = "abstract"
-        if journal_col:
-            rename[journal_col] = "journal"
-        if year_col:
-            rename[year_col] = "year"
+    df_upload = st.session_state.uploaded_df_temp
+    all_columns = list(df_upload.columns)
 
-        df_upload = df_upload.rename(columns=rename)
+    st.markdown("### Required field")
 
-        for col in ["journal", "year", "abstract"]:
-            if col not in df_upload.columns:
-                df_upload[col] = None
+    title_col = st.selectbox(
+        "Title (required)",
+        options=["— Select —"] + all_columns,
+        key="map_title"
+    )
 
-        added, search_id = normalize_and_import_csv(
-            uploaded_df=df_upload,
-            project_csv=csv_file,
-            database_name=database_name,
-            search_start_year=search_start_year,
-            search_end_year=search_end_year,
-        )
+    st.markdown("### Optional fields")
 
-        metadata.setdefault("searches", []).append({
-            "database": database_name,
-            "search_strategy": search_strategy,
-            "search_start_year": search_start_year,
-            "search_end_year": search_end_year,
-            "run_date": date.today().isoformat(),
-            "records_added": added,
-            "import_stage": csv_purpose
-        })
+    abstract_col = st.selectbox(
+        "Abstract",
+        options=["— None —"] + all_columns,
+        key="map_abstract"
+    )
 
-        save_metadata(project, metadata)
+    journal_col = st.selectbox(
+        "Journal / Source",
+        options=["— None —"] + all_columns,
+        key="map_journal"
+    )
 
-        st.success(f"Imported {added} new records (search {search_id}).")
-        st.rerun()
+    year_col = st.selectbox(
+        "Publication year",
+        options=["— None —"] + all_columns,
+        key="map_year"
+    )
+
+    st.markdown("### Custom fields (optional)")
+
+    custom_fields_raw = st.text_area(
+        "Enter additional columns to include (comma-separated)",
+        placeholder="e.g., authors, doi, keywords",
+        key="map_custom"
+    )
+
+    col_confirm, col_cancel = st.columns(2)
+
+    # ---------- CONFIRM ----------
+    with col_confirm:
+        if st.button("✅ Confirm & Import", key="confirm_import"):
+
+            if title_col == "— Select —":
+                st.error("A title column is required.")
+                st.stop()
+
+            def none_to_null(x):
+                return None if x.startswith("—") else x
+
+            mapping = {
+                "title": title_col,
+                "abstract": none_to_null(abstract_col),
+                "journal": none_to_null(journal_col),
+                "year": none_to_null(year_col),
+            }
+
+            custom_fields = [
+                c.strip()
+                for c in custom_fields_raw.split(",")
+                if c.strip()
+            ]
+
+            # ---------- APPLY MAPPING ----------
+            rename = {mapping["title"]: "title"}
+
+            if mapping["abstract"]:
+                rename[mapping["abstract"]] = "abstract"
+            if mapping["journal"]:
+                rename[mapping["journal"]] = "journal"
+            if mapping["year"]:
+                rename[mapping["year"]] = "year"
+
+            df_std = df_upload.rename(columns=rename)
+
+            for col in ["abstract", "journal", "year"]:
+                if col not in df_std.columns:
+                    df_std[col] = None
+
+            for col in custom_fields:
+                if col not in df_std.columns:
+                    df_std[col] = None
+
+            # ---------- IMPORT ----------
+            added, search_id = normalize_and_import_csv(
+                uploaded_df=df_std,
+                project_csv=csv_file,
+                database_name=database_name,
+                search_start_year=search_start_year,
+                search_end_year=search_end_year,
+            )
+
+            metadata.setdefault("searches", []).append({
+                "database": database_name,
+                "search_strategy": search_strategy,
+                "search_start_year": search_start_year,
+                "search_end_year": search_end_year,
+                "run_date": date.today().isoformat(),
+                "records_added": added,
+                "import_stage": csv_purpose,
+                "schema_mapping": mapping,
+                "custom_fields": custom_fields,
+            })
+
+            save_metadata(project, metadata)
+
+            st.session_state.show_schema_dialog = False
+            st.session_state.uploaded_df_temp = None
+
+            st.success(f"Imported {added} records.")
+            st.rerun()
+
+    # ---------- CANCEL ----------
+    with col_cancel:
+        if st.button("❌ Cancel", key="cancel_import"):
+            st.session_state.show_schema_dialog = False
+            st.session_state.uploaded_df_temp = None
+            st.rerun()
 
 
 # =========================
@@ -652,47 +693,27 @@ else:
 
 
 # =========================
-# RECORD PREVIEW
+# STANDARDIZED RECORD PREVIEW
 # =========================
 
-st.subheader("🗐 Record Preview by Screening Stage")
+st.subheader("🗐 Standardized Record Preview")
 
-tab1, tab2, tab3 = st.tabs([
-    "Title/Abstract Screening",
-    "Full-Text Screening",
-    "Data Extraction"
-])
+if os.path.exists(csv_file) and os.path.getsize(csv_file) > 0:
+    df_all = pd.read_csv(csv_file)
 
-def preview_stage(tab, stage, empty_msg):
-    path = stage_csv_path(project, stage)
-    with tab:
-        if os.path.exists(path) and os.path.getsize(path) > 0:
-            df_stage = pd.read_csv(path)
-            st.dataframe(
-                df_stage.head(50),
-                use_container_width=True,
-                height=400
-            )
-        else:
-            st.info(empty_msg)
+    st.caption(
+        f"Showing standardized records combined across all databases "
+        f"({len(df_all)} records)."
+    )
 
-preview_stage(
-    tab1,
-    "Title/abstract screening",
-    "No records imported yet for title/abstract screening."
-)
+    st.dataframe(
+        df_all,
+        use_container_width=True,
+        height=500
+    )
+else:
+    st.info("No standardized records available yet. Import a CSV to begin.")
 
-preview_stage(
-    tab2,
-    "Full-text screening",
-    "No records imported yet for full-text screening."
-)
-
-preview_stage(
-    tab3,
-    "Data extraction",
-    "No records imported yet for data extraction."
-)
 
 
 
