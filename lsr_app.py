@@ -18,28 +18,22 @@ if "uploaded_df_temp" not in st.session_state:
     st.session_state.uploaded_df_temp = None
 
 import uuid
-from streamlit.runtime.scriptrunner import get_script_run_ctx
 
-def get_persistent_user_id():
-    ctx = get_script_run_ctx()
-    if ctx is None:
-        return None
-
-    session = st.session_state
-
-    if "persistent_user_id" not in session:
-        session["persistent_user_id"] = str(uuid.uuid4())
-
-    return session["persistent_user_id"]
-
+def get_workspace_id():
+    params = st.query_params
+    if "workspace" not in params:
+        new_id = "workspace_" + uuid.uuid4().hex[:8]
+        st.query_params["workspace"] = new_id
+        return new_id
+    return params["workspace"]
 
 # =========================
 # PATH CONFIG
 # =========================
 
-USER_ID = get_persistent_user_id()
+WORKSPACE_ID = get_workspace_id()
 
-PROJECT_ROOT = os.path.join("projects", USER_ID)
+PROJECT_ROOT = os.path.join("projects", WORKSPACE_ID)
 os.makedirs(PROJECT_ROOT, exist_ok=True)
 
 
