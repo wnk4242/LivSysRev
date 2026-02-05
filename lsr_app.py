@@ -298,7 +298,10 @@ study_id = metadata.setdefault("study_identification", {})
 history = study_id.setdefault("history", [])
 current = study_id.setdefault("current", {})
 
-with st.expander("Edit study identification (living document)", expanded=not bool(current)):
+with st.expander(
+    "Edit study identification (living document)",
+    expanded=False
+):
 
     title = st.text_input(
         "Working review title",
@@ -490,6 +493,10 @@ with st.expander("Register reference search", expanded=False):
     )
 
     if uploaded_csv and st.button("📥 Import and register records"):
+        if not database_name.strip() or not search_strategy.strip():
+            st.error("Database name and search strategy are required.")
+            st.stop()
+
         try:
             uploaded_csv.seek(0)
             df_upload = pd.read_csv(uploaded_csv, encoding="utf-8")
@@ -497,139 +504,106 @@ with st.expander("Register reference search", expanded=False):
             uploaded_csv.seek(0)
             df_upload = pd.read_csv(uploaded_csv, encoding="latin-1")
 
-        # store temporarily
         st.session_state.uploaded_df_temp = df_upload
         st.session_state.show_schema_dialog = True
 
-        if not database_name.strip() or not search_strategy.strip():
-            st.error("Database name and search strategy are required.")
-            st.stop()
+    if st.session_state.show_schema_dialog and st.session_state.uploaded_df_temp is not None:
 
-if st.session_state.show_schema_dialog and st.session_state.uploaded_df_temp is not None:
+        st.markdown("---")
+        st.subheader("🧩 Map CSV columns to standardized fields")
 
-    st.markdown("---")
-    st.subheader("🧩 Map CSV columns to standardized fields")
+        df_upload = st.session_state.uploaded_df_temp
+        all_columns = list(df_upload.columns)
 
-    df_upload = st.session_state.uploaded_df_temp
-    all_columns = list(df_upload.columns)
+        title_col = st.selectbox(
+            "Title (required)",
+            options=["— Select —"] + all_columns,
+            key="map_title"
+        )
 
-    st.markdown("### Required field")
+        abstract_col = st.selectbox(
+            "Abstract",
+            options=["— None —"] + all_columns,
+            key="map_abstract"
+        )
 
-    title_col = st.selectbox(
-        "Title (required)",
-        options=["— Select —"] + all_columns,
-        key="map_title"
-    )
+        journal_col = st.selectbox(
+            "Journal / Source",
+            options=["— None —"] + all_columns,
+            key="map_journal"
+        )
 
-    st.markdown("### Optional fields")
+        year_col = st.selectbox(
+            "Publication year",
+            options=["— None —"] + all_columns,
+            key="map_year"
+        )
 
-    abstract_col = st.selectbox(
-        "Abstract",
-        options=["— None —"] + all_columns,
-        key="map_abstract"
-    )
+        custom_fields_raw = st.text_area(
+            "Additional columns to include (comma-separated)",
+            key="map_custom"
+        )
 
-    journal_col = st.selectbox(
-        "Journal / Source",
-        options=["— None —"] + all_columns,
-        key="map_journal"
-    )
+        col_confirm, col_cancel = st.columns(2)
 
-    year_col = st.selectbox(
-        "Publication year",
-        options=["— None —"] + all_columns,
-        key="map_year"
-    )
+        with col_confirm:
+            if st.button("✅ Confirm & Import", key="confirm_import"):
 
-    st.markdown("### Custom fields (optional)")
+                if title_col == "— Select —":
+                    st.error("A title column is required.")
+                    st.stop()
 
-    custom_fields_raw = st.text_area(
-        "Enter additional columns to include (comma-separated)",
-        placeholder="e.g., authors, doi, keywords",
-        key="map_custom"
-    )
+                def clean(x):
+                    return None if x.startswith("—") else x
 
-    col_confirm, col_cancel = st.columns(2)
+                rename = {title_col: "title"}
+                if clean(abstract_col):
+                    rename[abstract_col] = "abstract"
+                if clean(journal_col):
+                    rename[journal_col] = "journal"
+                if clean(year_col):
+                    rename[year_col] = "year"
 
-    # ---------- CONFIRM ----------
-    with col_confirm:
-        if st.button("✅ Confirm & Import", key="confirm_import"):
+                df_std = df_upload.rename(columns=rename)
 
-            if title_col == "— Select —":
-                st.error("A title column is required.")
-                st.stop()
+                for col in ["abstract", "journal", "year"]:
+                    if col not in df_std.columns:
+                        df_std[col] = None
 
-            def none_to_null(x):
-                return None if x.startswith("—") else x
+                for c in [x.strip() for x in custom_fields_raw.split(",") if x.strip()]:
+                    if c not in df_std.columns:
+                        df_std[c] = None
 
-            mapping = {
-                "title": title_col,
-                "abstract": none_to_null(abstract_col),
-                "journal": none_to_null(journal_col),
-                "year": none_to_null(year_col),
-            }
+                added, _ = normalize_and_import_csv(
+                    uploaded_df=df_std,
+                    project_csv=csv_file,
+                    database_name=database_name,
+                    search_start_year=search_start_year,
+                    search_end_year=search_end_year,
+                )
 
-            custom_fields = [
-                c.strip()
-                for c in custom_fields_raw.split(",")
-                if c.strip()
-            ]
+                metadata.setdefault("searches", []).append({
+                    "database": database_name,
+                    "search_strategy": search_strategy,
+                    "search_start_year": search_start_year,
+                    "search_end_year": search_end_year,
+                    "run_date": date.today().isoformat(),
+                    "records_added": added,
+                    "import_stage": csv_purpose,
+                })
 
-            # ---------- APPLY MAPPING ----------
-            rename = {mapping["title"]: "title"}
+                save_metadata(project, metadata)
 
-            if mapping["abstract"]:
-                rename[mapping["abstract"]] = "abstract"
-            if mapping["journal"]:
-                rename[mapping["journal"]] = "journal"
-            if mapping["year"]:
-                rename[mapping["year"]] = "year"
+                st.session_state.show_schema_dialog = False
+                st.session_state.uploaded_df_temp = None
+                st.success(f"Imported {added} records.")
+                st.rerun()
 
-            df_std = df_upload.rename(columns=rename)
-
-            for col in ["abstract", "journal", "year"]:
-                if col not in df_std.columns:
-                    df_std[col] = None
-
-            for col in custom_fields:
-                if col not in df_std.columns:
-                    df_std[col] = None
-
-            # ---------- IMPORT ----------
-            added, search_id = normalize_and_import_csv(
-                uploaded_df=df_std,
-                project_csv=csv_file,
-                database_name=database_name,
-                search_start_year=search_start_year,
-                search_end_year=search_end_year,
-            )
-
-            metadata.setdefault("searches", []).append({
-                "database": database_name,
-                "search_strategy": search_strategy,
-                "search_start_year": search_start_year,
-                "search_end_year": search_end_year,
-                "run_date": date.today().isoformat(),
-                "records_added": added,
-                "import_stage": csv_purpose,
-                "schema_mapping": mapping,
-                "custom_fields": custom_fields,
-            })
-
-            save_metadata(project, metadata)
-
-            st.session_state.show_schema_dialog = False
-            st.session_state.uploaded_df_temp = None
-
-            st.success(f"Imported {added} records.")
-            st.rerun()
-
-    # ---------- CANCEL ----------
-    with col_cancel:
-        if st.button("❌ Cancel", key="cancel_import"):
-            st.session_state.show_schema_dialog = False
-            st.session_state.uploaded_df_temp = None
-            st.rerun()
+        with col_cancel:
+            if st.button("❌ Cancel", key="cancel_import"):
+                st.session_state.show_schema_dialog = False
+                st.session_state.uploaded_df_temp = None
+                st.rerun()
 
 
 # =========================
