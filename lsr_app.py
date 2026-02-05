@@ -8,7 +8,7 @@ import pandas as pd
 from datetime import date
 
 from lsr_core import normalize_and_import_csv
-
+import plotly.graph_objects as go
 # =========================
 # PATH CONFIG
 # =========================
@@ -53,6 +53,50 @@ def stage_csv_path(project, stage):
 
 def metadata_path(name):
     return os.path.join(project_path(name), "metadata.json")
+
+def build_sankey_from_counts(identified, ta, ft, de):
+    labels = [
+        "Records identified",
+        "Title/Abstract screening",
+        "Full-text screening",
+        "Data extraction",
+    ]
+
+    # Flow: Identified → TA → FT → DE
+    source = [0, 1, 2]
+    target = [1, 2, 3]
+
+    value = [
+        ta,   # Identified → Title/Abstract
+        ft,   # Title/Abstract → Full-text
+        de,   # Full-text → Data extraction
+    ]
+
+    fig = go.Figure(
+        data=[
+            go.Sankey(
+                arrangement="snap",
+                node=dict(
+                    pad=20,
+                    thickness=20,
+                    line=dict(color="gray", width=0.5),
+                    label=labels,
+                ),
+                link=dict(
+                    source=source,
+                    target=target,
+                    value=value,
+                ),
+            )
+        ]
+    )
+
+    fig.update_layout(
+        height=350,
+        margin=dict(l=20, r=20, t=30, b=20),
+    )
+
+    return fig
 
 # =========================
 # METADATA HELPERS
@@ -535,6 +579,37 @@ else:
         hide_index=True
     )
 
+# =========================
+# STUDY FLOW OVERVIEW
+# =========================
+
+st.subheader("📈 Study Flow Overview")
+
+# Total records identified across all searches
+identified = sum(
+    s.get("records_added", 0)
+    for s in metadata.get("searches", [])
+)
+
+ta_count = count_rows(stage_csv_path(project, "Title/abstract screening"))
+ft_count = count_rows(stage_csv_path(project, "Full-text screening"))
+de_count = count_rows(stage_csv_path(project, "Data extraction"))
+
+if identified > 0:
+    fig = build_sankey_from_counts(
+        identified=identified,
+        ta=ta_count,
+        ft=ft_count,
+        de=de_count,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("No study flow available yet. Import search results to begin.")
+
+
+# =========================
+# RECORD PREVIEW
+# =========================
 
 st.subheader("🗐 Record Preview by Screening Stage")
 
