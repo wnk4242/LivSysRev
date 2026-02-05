@@ -7,7 +7,11 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 
-from lsr_core import normalize_and_import_csv
+from lsr_core import (
+    normalize_and_import_csv,
+    resolve_bibliographic_columns
+)
+
 import plotly.graph_objects as go
 # =========================
 # PATH CONFIG
@@ -495,24 +499,63 @@ with st.expander("Register reference search", expanded=False):
         # Save stage-specific dataset for preview
         df_upload.to_csv(stage_csv_path(project, csv_purpose), index=False)
 
-        # ---- COLUMN NORMALIZATION ----
-        def norm(c): return c.lower().replace(" ", "").replace("_", "")
+        # ---- COLUMN DETECTION ----
+        colmap = resolve_bibliographic_columns(df_upload)
 
-        colmap = {norm(c): c for c in df_upload.columns}
+        st.markdown("### 🔍 Detected bibliographic fields")
 
-        title_col = next((colmap[c] for c in colmap if c in {"title","articletitle","documenttitle","ti"}), None)
-        abstract_col = next((colmap[c] for c in colmap if c in {"abstract","ab","summary","description"}), None)
-        journal_col = next((colmap[c] for c in colmap if c in {"journal","source","publicationname","so"}), None)
-        year_col = next((colmap[c] for c in colmap if c in {"year","py","publicationyear"}), None)
+        preview_rows = []
+        for field in ["title", "abstract", "journal", "year"]:
+            preview_rows.append({
+                "Canonical field": field,
+                "Detected column": colmap[field] or "❌ Not detected"
+            })
 
-        if not title_col or not abstract_col:
-            st.error("CSV must contain title and abstract columns.")
+        st.table(pd.DataFrame(preview_rows))
+
+        # ---- MANUAL OVERRIDE ----
+        st.markdown("### 🛠 Manual column override (if needed)")
+
+        available_columns = ["— None —"] + list(df_upload.columns)
+        override = {}
+
+        for field in ["title", "abstract", "journal", "year"]:
+            override[field] = st.selectbox(
+                f"{field.capitalize()} column",
+                options=available_columns,
+                index=(
+                    available_columns.index(colmap[field])
+                    if colmap[field] in available_columns
+                    else 0
+                ),
+                key=f"override_{field}"
+            )
+
+
+        def resolve_final(auto, manual):
+            if manual and manual != "— None —":
+                return manual
+            return auto
+
+
+        title_col = resolve_final(colmap["title"], override["title"])
+        abstract_col = resolve_final(colmap["abstract"], override["abstract"])
+        journal_col = resolve_final(colmap["journal"], override["journal"])
+        year_col = resolve_final(colmap["year"], override["year"])
+
+        # ---- VALIDATION ----
+        if not title_col:
+            st.error("A title column is required to import records.")
             st.stop()
 
-        rename = {
-            title_col: "title",
-            abstract_col: "abstract"
-        }
+        if not abstract_col:
+            st.warning("No abstract column selected. Records will be imported without abstracts.")
+
+        # ---- RENAME ----
+        rename = {title_col: "title"}
+
+        if abstract_col:
+            rename[abstract_col] = "abstract"
         if journal_col:
             rename[journal_col] = "journal"
         if year_col:
@@ -520,7 +563,7 @@ with st.expander("Register reference search", expanded=False):
 
         df_upload = df_upload.rename(columns=rename)
 
-        for col in ["journal", "year"]:
+        for col in ["journal", "year", "abstract"]:
             if col not in df_upload.columns:
                 df_upload[col] = None
 
@@ -650,6 +693,9 @@ preview_stage(
     "Data extraction",
     "No records imported yet for data extraction."
 )
+
+
+
 # -------------------------
 # Download standardized dataset
 # -------------------------

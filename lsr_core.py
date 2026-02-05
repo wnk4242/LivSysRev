@@ -4,6 +4,42 @@ import os
 import pandas as pd
 from datetime import date
 
+
+def normalize_colname(col):
+    return col.lower().replace(" ", "").replace("_", "")
+
+
+COLUMN_ALIASES = {
+    "title": {
+        "title", "articletitle", "documenttitle",
+        "publicationtitle", "itemtitle", "ti"
+    },
+    "abstract": {
+        "abstract", "abstracttext", "abstractnote",
+        "summary", "description", "ab"
+    },
+    "journal": {
+        "journal", "journal/book", "source", "sourcetitle",
+        "publicationname", "containertitle", "so"
+    },
+    "year": {
+        "year", "publicationyear", "py", "date", "issued"
+    }
+}
+
+
+def resolve_bibliographic_columns(df):
+    normalized = {normalize_colname(c): c for c in df.columns}
+    resolved = {}
+
+    for canonical, aliases in COLUMN_ALIASES.items():
+        resolved[canonical] = next(
+            (normalized[a] for a in aliases if a in normalized),
+            None
+        )
+
+    return resolved
+
 # =========================
 # CANONICAL CSV SCHEMA
 # =========================
