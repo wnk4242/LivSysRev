@@ -17,13 +17,17 @@ if "show_schema_dialog" not in st.session_state:
 if "uploaded_df_temp" not in st.session_state:
     st.session_state.uploaded_df_temp = None
 
-
+import uuid
 # =========================
 # PATH CONFIG
 # =========================
 
-PROJECT_ROOT = "projects"
+if "user_id" not in st.session_state:
+    st.session_state.user_id = str(uuid.uuid4())
+
+PROJECT_ROOT = os.path.join("projects", st.session_state.user_id)
 os.makedirs(PROJECT_ROOT, exist_ok=True)
+
 
 # =========================
 # SYSTEMATIC REVIEW STAGES
