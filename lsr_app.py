@@ -18,14 +18,28 @@ if "uploaded_df_temp" not in st.session_state:
     st.session_state.uploaded_df_temp = None
 
 import uuid
+from streamlit.runtime.scriptrunner import get_script_run_ctx
+
+def get_persistent_user_id():
+    ctx = get_script_run_ctx()
+    if ctx is None:
+        return None
+
+    session = st.session_state
+
+    if "persistent_user_id" not in session:
+        session["persistent_user_id"] = str(uuid.uuid4())
+
+    return session["persistent_user_id"]
+
+
 # =========================
 # PATH CONFIG
 # =========================
 
-if "user_id" not in st.session_state:
-    st.session_state.user_id = str(uuid.uuid4())
+USER_ID = get_persistent_user_id()
 
-PROJECT_ROOT = os.path.join("projects", st.session_state.user_id)
+PROJECT_ROOT = os.path.join("projects", USER_ID)
 os.makedirs(PROJECT_ROOT, exist_ok=True)
 
 
