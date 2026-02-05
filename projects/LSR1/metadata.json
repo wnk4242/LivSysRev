@@ -1,0 +1,23 @@
+{
+  "stage_status": {
+    "Study identification": "In progress",
+    "Title/abstract screening": "Not started",
+    "Full-text screening": "Not started",
+    "Data extraction": "Not started"
+  },
+  "study_identification": {
+    "history": [],
+    "current": {}
+  },
+  "searches": [
+    {
+      "database": "pubmed",
+      "search_strategy": "xx",
+      "search_start_year": 2000,
+      "search_end_year": 2026,
+      "run_date": "2026-02-05",
+      "records_added": 10,
+      "import_stage": "Title/abstract screening"
+    }
+  ]
+}
