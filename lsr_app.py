@@ -171,7 +171,7 @@ save_metadata(project, metadata)
 # PROJECT PROGRESS DASHBOARD
 # =========================
 
-st.subheader("📊 Systematic Review Project Status")
+st.subheader("📊 Project Status")
 
 # ---- Load + initialize metadata ----
 metadata = load_metadata(project)
