@@ -17,15 +17,48 @@ if "show_schema_dialog" not in st.session_state:
 if "uploaded_df_temp" not in st.session_state:
     st.session_state.uploaded_df_temp = None
 
-import uuid
-
 def get_workspace_id():
     params = st.query_params
-    if "workspace" not in params:
-        new_id = "workspace_" + uuid.uuid4().hex[:8]
-        st.query_params["workspace"] = new_id
-        return new_id
-    return params["workspace"]
+
+    # 1️⃣ If workspace is explicitly provided in URL (shared link)
+    if "workspace" in params and params["workspace"].strip():
+        workspace = params["workspace"]
+        st.session_state.workspace = workspace
+        return workspace
+
+    # 2️⃣ If workspace already stored in session (normal return visit)
+    if "workspace" in st.session_state:
+        return st.session_state.workspace
+
+    # 3️⃣ First-time user: ask once
+    st.markdown("### 🔑 Choose your workspace")
+
+    st.info(
+        "This app uses the workspace link to store your projects. "
+        "Please **save or bookmark this exact link** to return to your projects later."
+    )
+
+    workspace_input = st.text_input(
+        "Workspace name",
+        placeholder="e.g., wnk, naike, depression_review"
+    )
+
+    if st.button("Continue"):
+        if not workspace_input.strip():
+            st.error("Workspace name cannot be empty.")
+            st.stop()
+
+        workspace = workspace_input.strip().replace(" ", "_")
+
+        # Save invisibly
+        st.session_state.workspace = workspace
+
+        # Write to URL ONCE (user never needs to see it)
+        st.query_params["workspace"] = workspace
+        st.rerun()
+
+    st.stop()
+
 
 # =========================
 # PATH CONFIG
