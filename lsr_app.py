@@ -67,9 +67,9 @@ def build_sankey_from_counts(identified, ta, ft, de):
     target = [1, 2, 3]
 
     value = [
-        ta,   # Identified → Title/Abstract
-        ft,   # Title/Abstract → Full-text
-        de,   # Full-text → Data extraction
+        identified,  # Records identified → Title/Abstract
+        ta,          # Title/Abstract → Full-text
+        ft,          # Full-text → Data extraction
     ]
 
     fig = go.Figure(
@@ -97,6 +97,7 @@ def build_sankey_from_counts(identified, ta, ft, de):
     )
 
     return fig
+
 
 # =========================
 # METADATA HELPERS
