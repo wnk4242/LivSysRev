@@ -190,10 +190,13 @@ def build_sankey_from_counts(identified, ta, ft, de, searches):
     )
 
     fig.update_layout(
+        font=dict(
+            color="#111111",  # dark, readable
+            size=13
+        ),
         height=380,
         margin=dict(l=20, r=20, t=30, b=20),
     )
-
     return fig
 
 
@@ -883,7 +886,7 @@ if identified > 0:
         de=de_count,
         searches=metadata.get("searches", []),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, theme=None)
 else:
     st.info("No study flow available yet. Import search results to begin.")
 
