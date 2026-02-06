@@ -427,6 +427,11 @@ with st.expander(
 
             history.append(snapshot)
             study_id["current"] = snapshot["data"]
+
+            # Auto-update Study identification status on first save
+            if metadata["stage_status"].get("Study identification") == "Not started":
+                metadata["stage_status"]["Study identification"] = "In progress"
+
             save_metadata(project, metadata)
             st.success(f"Saved version v{new_version}")
             st.rerun()
@@ -619,7 +624,7 @@ with st.expander("Register reference search", expanded=False):
                     if c not in df_std.columns:
                         df_std[c] = None
 
-                added, _ = normalize_and_import_csv(
+                added, search_id = normalize_and_import_csv(
                     uploaded_df=df_std,
                     project_csv=csv_file,
                     database_name=database_name,
@@ -628,6 +633,7 @@ with st.expander("Register reference search", expanded=False):
                 )
 
                 metadata.setdefault("searches", []).append({
+                    "search_id": search_id,
                     "database": database_name,
                     "search_strategy": search_strategy,
                     "search_start_year": search_start_year,
