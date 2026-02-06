@@ -116,58 +116,86 @@ def count_rows(path):
 def metadata_path(name):
     return os.path.join(project_path(name), "metadata.json")
 
-def build_sankey_from_counts(identified, ta, ft, de):
-    labels = [
-        "",  # invisible dummy source
+def build_sankey_from_counts(identified, ta, ft, de, searches):
+    labels = []
+    source = []
+    target = []
+    value = []
+
+    idx = {}
+
+    # -------------------------------
+    # DATABASE SOURCES (RAW COUNTS)
+    # -------------------------------
+    db_counts = {}
+    for s in searches:
+        if s.get("import_stage") == "Search results to merge & remove duplicates":
+            db = s.get("database", "Unknown")
+            db_counts[db] = db_counts.get(db, 0) + s.get("records_raw", 0)
+
+    for db in db_counts:
+        idx[db] = len(labels)
+        labels.append(db)
+
+    # -------------------------------
+    # PRISMA NODES
+    # -------------------------------
+    for name in [
         "Records identified",
         "Title/Abstract screening",
         "Full-text screening",
         "Data extraction",
-    ]
+    ]:
+        idx[name] = len(labels)
+        labels.append(name)
 
-    # Dummy → Identified → TA → FT → DE
-    source = [0, 1, 2, 3]
-    target = [1, 2, 3, 4]
+    # -------------------------------
+    # DATABASE → RECORDS IDENTIFIED
+    # -------------------------------
+    for db, n in db_counts.items():
+        source.append(idx[db])
+        target.append(idx["Records identified"])
+        value.append(n)
 
-    value = [
-        identified,  # dummy → identified (forces width = total)
-        ta,          # identified → title/abstract
-        ft,          # title/abstract → full-text
-        de,          # full-text → data extraction
-    ]
+    # -------------------------------
+    # PRISMA FLOWS (CRITICAL)
+    # -------------------------------
+    source.append(idx["Records identified"])
+    target.append(idx["Title/Abstract screening"])
+    value.append(ta)
+
+    source.append(idx["Title/Abstract screening"])
+    target.append(idx["Full-text screening"])
+    value.append(ft)
+
+    source.append(idx["Full-text screening"])
+    target.append(idx["Data extraction"])
+    value.append(de)
 
     fig = go.Figure(
-        data=[
-            go.Sankey(
-                arrangement="snap",
-                node=dict(
-                    pad=20,
-                    thickness=20,
-                    line=dict(color="gray", width=0.5),
-                    label=labels,
-                    color=[
-                        "rgba(0,0,0,0)",  # invisible dummy
-                        "#1f77b4",        # identified
-                        "#9fd8ff",        # TA
-                        "#ff4d4d",        # FT
-                        "#ffb3b3",        # DE
-                    ],
-                ),
-                link=dict(
-                    source=source,
-                    target=target,
-                    value=value,
-                ),
-            )
-        ]
+        go.Sankey(
+            arrangement="snap",
+            node=dict(
+                pad=20,
+                thickness=20,
+                line=dict(color="gray", width=0.5),
+                label=labels,
+            ),
+            link=dict(
+                source=source,
+                target=target,
+                value=value,
+            ),
+        )
     )
 
     fig.update_layout(
-        height=350,
+        height=380,
         margin=dict(l=20, r=20, t=30, b=20),
     )
 
     return fig
+
 
 
 # =========================
@@ -312,6 +340,7 @@ study_identification_count = sum(
     for s in metadata.get("searches", [])
     if s.get("import_stage") == "Search results to merge & remove duplicates"
 )
+
 
 
 counts = {
@@ -722,9 +751,10 @@ with st.expander("Register reference search", expanded=False):
                 # SAVE DATA BY STAGE
                 # =========================
 
-                if csv_purpose == "Search results to merge & remove duplicates":
-                    raw_count = len(df_std)  # RAW count INCLUDING duplicates
+                raw_count = len(df_std)  # ALWAYS defined
 
+                if csv_purpose == "Search results to merge & remove duplicates":
+                    # Deduplicate
                     added, search_id = normalize_and_import_csv(
                         uploaded_df=df_std,
                         project_csv=stage_data_path(project, csv_purpose),
@@ -732,12 +762,15 @@ with st.expander("Register reference search", expanded=False):
                         search_start_year=search_start_year,
                         search_end_year=search_end_year,
                     )
+                    dedup_count = added
 
                 else:
+                    # TA / FT snapshots (no deduplication)
                     stage_csv = stage_data_path(project, csv_purpose)
                     df_std.to_csv(stage_csv, index=False)
-                    added = len(df_std)
+                    added = raw_count
                     search_id = None
+                    dedup_count = None
 
                 metadata.setdefault("searches", []).append({
                     "search_id": search_id,
@@ -747,9 +780,9 @@ with st.expander("Register reference search", expanded=False):
                     "search_end_year": search_end_year if is_db_search_stage else None,
                     "run_date": date.today().isoformat(),
 
-                    # 🔑 CRITICAL
-                    "records_raw": raw_count if csv_purpose == "Search results to merge & remove duplicates" else None,
-                    "records_added": added,
+                    # 🔑 COUNTS
+                    "records_raw": raw_count,  # ALWAYS exists
+                    "records_deduplicated": dedup_count,  # None for TA / FT
 
                     "import_stage": csv_purpose,
                 })
@@ -824,6 +857,7 @@ identified = sum(
     if s.get("import_stage") == "Search results to merge & remove duplicates"
 )
 
+
 # After deduplication
 ta_count = count_rows(
     stage_data_path(project, "Search results to merge & remove duplicates")
@@ -847,6 +881,7 @@ if identified > 0:
         ta=ta_count,
         ft=ft_count,
         de=de_count,
+        searches=metadata.get("searches", []),
     )
     st.plotly_chart(fig, use_container_width=True)
 else:
