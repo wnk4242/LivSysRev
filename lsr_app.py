@@ -571,10 +571,10 @@ with st.expander("Register reference search", expanded=False):
             key="map_title"
         )
 
-        abstract_col = st.selectbox(
-            "Abstract",
+        authors_col = st.selectbox(
+            "Author(s)",
             options=["— None —"] + all_columns,
-            key="map_abstract"
+            key="map_authors"
         )
 
         journal_col = st.selectbox(
@@ -587,6 +587,12 @@ with st.expander("Register reference search", expanded=False):
             "Publication year",
             options=["— None —"] + all_columns,
             key="map_year"
+        )
+
+        abstract_col = st.selectbox(
+            "Abstract",
+            options=["— None —"] + all_columns,
+            key="map_abstract"
         )
 
         custom_fields_raw = st.text_area(
@@ -606,17 +612,24 @@ with st.expander("Register reference search", expanded=False):
                 def clean(x):
                     return None if x.startswith("—") else x
 
+
                 rename = {title_col: "title"}
-                if clean(abstract_col):
-                    rename[abstract_col] = "abstract"
+
+                if clean(authors_col):
+                    rename[authors_col] = "authors"
+
                 if clean(journal_col):
                     rename[journal_col] = "journal"
+
                 if clean(year_col):
                     rename[year_col] = "year"
 
+                if clean(abstract_col):
+                    rename[abstract_col] = "abstract"
+
                 df_std = df_upload.rename(columns=rename)
 
-                for col in ["abstract", "journal", "year"]:
+                for col in ["authors", "journal", "year", "abstract"]:
                     if col not in df_std.columns:
                         df_std[col] = None
 
