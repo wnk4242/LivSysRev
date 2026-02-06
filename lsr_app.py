@@ -118,20 +118,22 @@ def metadata_path(name):
 
 def build_sankey_from_counts(identified, ta, ft, de):
     labels = [
+        "",  # invisible dummy source
         "Records identified",
         "Title/Abstract screening",
         "Full-text screening",
         "Data extraction",
     ]
 
-    # Flow: Identified → TA → FT → DE
-    source = [0, 1, 2]
-    target = [1, 2, 3]
+    # Dummy → Identified → TA → FT → DE
+    source = [0, 1, 2, 3]
+    target = [1, 2, 3, 4]
 
     value = [
-        identified,  # Records identified → Title/Abstract
-        ta,          # Title/Abstract → Full-text
-        ft,          # Full-text → Data extraction
+        identified,  # dummy → identified (forces width = total)
+        ta,          # identified → title/abstract
+        ft,          # title/abstract → full-text
+        de,          # full-text → data extraction
     ]
 
     fig = go.Figure(
@@ -143,6 +145,13 @@ def build_sankey_from_counts(identified, ta, ft, de):
                     thickness=20,
                     line=dict(color="gray", width=0.5),
                     label=labels,
+                    color=[
+                        "rgba(0,0,0,0)",  # invisible dummy
+                        "#1f77b4",        # identified
+                        "#9fd8ff",        # TA
+                        "#ff4d4d",        # FT
+                        "#ffb3b3",        # DE
+                    ],
                 ),
                 link=dict(
                     source=source,
@@ -291,17 +300,33 @@ save_metadata(project, metadata)
 
 base_path = project_path(project)
 
+# =========================
+# PROJECT PROGRESS DASHBOARD (PRISMA-CORRECT)
+# =========================
+
+metadata = load_metadata(project)
+
+# Study identification = total records identified (WITH duplicates)
+study_identification_count = sum(
+    s.get("records_raw", 0)
+    for s in metadata.get("searches", [])
+    if s.get("import_stage") == "Search results to merge & remove duplicates"
+)
+
+
 counts = {
+    "Study identification": study_identification_count,
     "Title/abstract screening": count_rows(
-        stage_data_path(project, "Studies included after title/abstract screening")
+        stage_data_path(project, "Search results to merge & remove duplicates")
     ),
     "Full-text screening": count_rows(
-        stage_data_path(project, "Studies included after full-text screening")
+        stage_data_path(project, "Studies included after title/abstract screening")
     ),
     "Data extraction": count_rows(
         stage_data_path(project, "Studies included after full-text screening")
     ),
 }
+
 
 
 # ---- Table header ----
@@ -321,10 +346,7 @@ for stage in STAGES:
         st.markdown(stage)
 
     with col_records:
-        if stage == "Study identification":
-            st.markdown("—")  # or "NA"
-        else:
-            st.markdown(str(counts.get(stage, 0)))
+        st.markdown(str(counts.get(stage, 0)))
 
     with col_status:
         status = metadata["stage_status"][stage]
@@ -667,25 +689,26 @@ with st.expander("Register reference search", expanded=False):
                     if c not in df_std.columns:
                         df_std[c] = None
 
-                # =========================
-                # VALIDATE CSV STAGE ORDER & ROW COUNTS
-                # =========================
 
-                metadata.setdefault("stage_counts", {})
+
+                # =========================
+                # VALIDATE CSV STAGE ORDER & ROW COUNTS (SOURCE OF TRUTH = FILES)
+                # =========================
 
                 current_stage_index = STAGE_ORDER.index(csv_purpose)
                 current_count = len(df_std)
 
                 if current_stage_index > 0:
                     prev_stage = STAGE_ORDER[current_stage_index - 1]
+                    prev_path = stage_data_path(project, prev_stage)
 
-                    if prev_stage not in metadata["stage_counts"]:
+                    if not os.path.exists(prev_path):
                         st.error(
                             f"You must first register a CSV for: '{prev_stage}'."
                         )
                         st.stop()
 
-                    prev_count = metadata["stage_counts"][prev_stage]
+                    prev_count = count_rows(prev_path)
 
                     if current_count > prev_count:
                         st.error(
@@ -700,6 +723,8 @@ with st.expander("Register reference search", expanded=False):
                 # =========================
 
                 if csv_purpose == "Search results to merge & remove duplicates":
+                    raw_count = len(df_std)  # RAW count INCLUDING duplicates
+
                     added, search_id = normalize_and_import_csv(
                         uploaded_df=df_std,
                         project_csv=stage_data_path(project, csv_purpose),
@@ -707,6 +732,7 @@ with st.expander("Register reference search", expanded=False):
                         search_start_year=search_start_year,
                         search_end_year=search_end_year,
                     )
+
                 else:
                     stage_csv = stage_data_path(project, csv_purpose)
                     df_std.to_csv(stage_csv, index=False)
@@ -720,23 +746,13 @@ with st.expander("Register reference search", expanded=False):
                     "search_start_year": search_start_year if is_db_search_stage else None,
                     "search_end_year": search_end_year if is_db_search_stage else None,
                     "run_date": date.today().isoformat(),
+
+                    # 🔑 CRITICAL
+                    "records_raw": raw_count if csv_purpose == "Search results to merge & remove duplicates" else None,
                     "records_added": added,
+
                     "import_stage": csv_purpose,
                 })
-
-                # =========================
-                # RECORD STAGE ROW COUNTS
-                # =========================
-
-                metadata.setdefault("stage_counts", {})
-
-                if csv_purpose == "Search results to merge & remove duplicates":
-                    # Count actual stored records after deduplication
-                    dedup_path = stage_data_path(project, csv_purpose)
-                    metadata["stage_counts"][csv_purpose] = count_rows(dedup_path)
-                else:
-                    # TA / FT stages are snapshots → exact CSV length
-                    metadata["stage_counts"][csv_purpose] = len(df_std)
 
                 save_metadata(project, metadata)
 
@@ -795,10 +811,34 @@ dedup_path = stage_data_path(project, "Search results to merge & remove duplicat
 ta_path = stage_data_path(project, "Studies included after title/abstract screening")
 ft_path = stage_data_path(project, "Studies included after full-text screening")
 
-identified = count_rows(dedup_path)
-ta_count = count_rows(ta_path)
-ft_count = count_rows(ft_path)
-de_count = ft_count
+# =========================
+# STUDY FLOW OVERVIEW (PRISMA-CORRECT)
+# =========================
+
+metadata = load_metadata(project)
+
+# Records identified (WITH duplicates, across databases)
+identified = sum(
+    s.get("records_raw", 0)
+    for s in metadata.get("searches", [])
+    if s.get("import_stage") == "Search results to merge & remove duplicates"
+)
+
+# After deduplication
+ta_count = count_rows(
+    stage_data_path(project, "Search results to merge & remove duplicates")
+)
+
+# After title/abstract screening
+ft_count = count_rows(
+    stage_data_path(project, "Studies included after title/abstract screening")
+)
+
+# After full-text screening / data extraction
+de_count = count_rows(
+    stage_data_path(project, "Studies included after full-text screening")
+)
+
 
 
 if identified > 0:
