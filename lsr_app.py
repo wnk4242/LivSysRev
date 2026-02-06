@@ -191,8 +191,8 @@ def build_sankey_from_counts(identified, ta, ft, de, searches):
 
     fig.update_layout(
         font=dict(
-            color="#111111",  # dark, readable
-            size=13
+            color="black",  # dark, readable
+            size=15
         ),
         height=380,
         margin=dict(l=20, r=20, t=30, b=20),
@@ -248,6 +248,20 @@ st.set_page_config(
     layout="centered"
 )
 
+# =========================
+# FIX PLOTLY SANKEY DOUBLE TEXT (STREAMLIT SVG SHADOW)
+# =========================
+st.markdown(
+    """
+    <style>
+    svg text {
+        text-shadow: none !important;
+        stroke: none !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 st.title("📚 Living Systematic Review Manager")
 st.write(
