@@ -40,7 +40,7 @@ def get_workspace_id():
 
     workspace_input = st.text_input(
         "Workspace name",
-        placeholder="e.g., wnk, naike, depression_review"
+        placeholder="e.g., your lab name"
     )
 
     if st.button("Continue"):
