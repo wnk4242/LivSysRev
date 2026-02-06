@@ -821,7 +821,7 @@ else:
             "Database": s.get("database"),
             "Date": s.get("run_date"),
             "Coverage": f"{s.get('search_start_year')}–{s.get('search_end_year')}",
-            "Records identified": s.get("records_added"),
+            "Records identified": s.get("records_raw"),
             "Search query (verbatim)": s.get("search_strategy"),
         })
 
