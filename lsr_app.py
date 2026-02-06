@@ -83,12 +83,26 @@ STAGES = [
 
 STAGE_STATUSES = ["Not started", "In progress", "Completed"]
 
+# =========================
+# CSV REGISTRATION ORDER
+# =========================
+
+STAGE_ORDER = [
+    "Search results to merge & remove duplicates",
+    "Studies included after title/abstract screening",
+    "Studies included after full-text screening"
+]
 
 def project_path(name):
     return os.path.join(PROJECT_ROOT, name)
 
-def csv_path(name):
-    return os.path.join(project_path(name), "data.csv")
+def stage_data_path(project, csv_purpose):
+    mapping = {
+        "Search results to merge & remove duplicates": "records_deduplicated.csv",
+        "Studies included after title/abstract screening": "records_after_ta.csv",
+        "Studies included after full-text screening": "records_after_ft.csv",
+    }
+    return os.path.join(project_path(project), mapping[csv_purpose])
 
 def count_rows(path):
     if os.path.exists(path) and os.path.getsize(path) > 0:
@@ -96,13 +110,7 @@ def count_rows(path):
     return 0
 
 
-def stage_csv_path(project, stage):
-    mapping = {
-        "Title/abstract screening": "title_abstract.csv",
-        "Full-text screening": "full_text.csv",
-        "Data extraction": "data_extraction.csv"
-    }
-    return os.path.join(project_path(project), mapping[stage])
+
 
 
 def metadata_path(name):
@@ -257,7 +265,7 @@ st.subheader(f"📂 Project: `{project}`")
 # Load + initialize metadata (MUST COME FIRST)
 # -------------------------
 
-csv_file = csv_path(project)
+
 metadata = load_metadata(project)
 
 metadata.setdefault("stage_status", {})
@@ -284,10 +292,17 @@ save_metadata(project, metadata)
 base_path = project_path(project)
 
 counts = {
-    "Title/abstract screening": count_rows(os.path.join(base_path, "title_abstract.csv")),
-    "Full-text screening": count_rows(os.path.join(base_path, "full_text.csv")),
-    "Data extraction": count_rows(os.path.join(base_path, "data_extraction.csv")),
+    "Title/abstract screening": count_rows(
+        stage_data_path(project, "Studies included after title/abstract screening")
+    ),
+    "Full-text screening": count_rows(
+        stage_data_path(project, "Studies included after full-text screening")
+    ),
+    "Data extraction": count_rows(
+        stage_data_path(project, "Studies included after full-text screening")
+    ),
 }
+
 
 # ---- Table header ----
 col_stage, col_records, col_status = st.columns([3, 1.2, 4])
@@ -497,43 +512,53 @@ Last updated: {last_updated}
 
 st.subheader("🔎 Reference Searches")
 
+csv_purpose = st.selectbox(
+    "This CSV contains:",
+    [
+        "Search results to merge & remove duplicates",
+        "Studies included after title/abstract screening",
+        "Studies included after full-text screening"
+    ]
+)
+
+is_db_search_stage = (csv_purpose == "Search results to merge & remove duplicates")
+
+
 with st.expander("Register reference search", expanded=False):
-
-    database_name = st.text_input(
-        "Enter a database searched",
-        placeholder="e.g., PubMed",
-        help="Enter one database name at a time."
-    )
-
-    search_strategy = st.text_area(
-        "Enter the search query you used (verbatim)",
-        height=120
-    )
-
-    csv_purpose = st.selectbox(
-        "This CSV is imported for:",
-        [
-            "Title/abstract screening",
-            "Full-text screening",
-            "Data extraction"
-        ]
-    )
-
-    c1, c2 = st.columns(2)
-    with c1:
-        search_start_year = st.number_input(
-            "Search start year",
-            min_value=1900,
-            max_value=date.today().year,
-            value=2000
+    if is_db_search_stage:
+        database_name = st.text_input(
+            "Enter a database searched",
+            placeholder="e.g., PubMed",
+            help="Enter one database name at a time."
         )
-    with c2:
-        search_end_year = st.number_input(
-            "Search end year",
-            min_value=1900,
-            max_value=date.today().year,
-            value=date.today().year
+
+        search_strategy = st.text_area(
+            "Enter the search query you used (verbatim)",
+            height=120
         )
+    else:
+        database_name = None
+        search_strategy = None
+
+    if is_db_search_stage:
+        c1, c2 = st.columns(2)
+        with c1:
+            search_start_year = st.number_input(
+                "Search start year",
+                min_value=1900,
+                max_value=date.today().year,
+                value=2000
+            )
+        with c2:
+            search_end_year = st.number_input(
+                "Search end year",
+                min_value=1900,
+                max_value=date.today().year,
+                value=date.today().year
+            )
+    else:
+        search_start_year = None
+        search_end_year = None
 
     st.markdown("### Upload search results (CSV)")
 
@@ -543,9 +568,14 @@ with st.expander("Register reference search", expanded=False):
     )
 
     if uploaded_csv and st.button("📥 Import and register records"):
-        if not database_name.strip() or not search_strategy.strip():
-            st.error("Database name and search strategy are required.")
-            st.stop()
+        if is_db_search_stage:
+            if not database_name or not database_name.strip():
+                st.error("Database name is required for search result uploads.")
+                st.stop()
+
+            if not search_strategy or not search_strategy.strip():
+                st.error("Search query is required for search result uploads.")
+                st.stop()
 
         try:
             uploaded_csv.seek(0)
@@ -637,24 +667,76 @@ with st.expander("Register reference search", expanded=False):
                     if c not in df_std.columns:
                         df_std[c] = None
 
-                added, search_id = normalize_and_import_csv(
-                    uploaded_df=df_std,
-                    project_csv=csv_file,
-                    database_name=database_name,
-                    search_start_year=search_start_year,
-                    search_end_year=search_end_year,
-                )
+                # =========================
+                # VALIDATE CSV STAGE ORDER & ROW COUNTS
+                # =========================
+
+                metadata.setdefault("stage_counts", {})
+
+                current_stage_index = STAGE_ORDER.index(csv_purpose)
+                current_count = len(df_std)
+
+                if current_stage_index > 0:
+                    prev_stage = STAGE_ORDER[current_stage_index - 1]
+
+                    if prev_stage not in metadata["stage_counts"]:
+                        st.error(
+                            f"You must first register a CSV for: '{prev_stage}'."
+                        )
+                        st.stop()
+
+                    prev_count = metadata["stage_counts"][prev_stage]
+
+                    if current_count > prev_count:
+                        st.error(
+                            f"Invalid CSV: this file contains {current_count} records, "
+                            f"which is more than the previous stage ({prev_count}). "
+                            "Record counts must decrease across stages."
+                        )
+                        st.stop()
+
+                # =========================
+                # SAVE DATA BY STAGE
+                # =========================
+
+                if csv_purpose == "Search results to merge & remove duplicates":
+                    added, search_id = normalize_and_import_csv(
+                        uploaded_df=df_std,
+                        project_csv=stage_data_path(project, csv_purpose),
+                        database_name=database_name,
+                        search_start_year=search_start_year,
+                        search_end_year=search_end_year,
+                    )
+                else:
+                    stage_csv = stage_data_path(project, csv_purpose)
+                    df_std.to_csv(stage_csv, index=False)
+                    added = len(df_std)
+                    search_id = None
 
                 metadata.setdefault("searches", []).append({
                     "search_id": search_id,
-                    "database": database_name,
-                    "search_strategy": search_strategy,
-                    "search_start_year": search_start_year,
-                    "search_end_year": search_end_year,
+                    "database": database_name if is_db_search_stage else None,
+                    "search_strategy": search_strategy if is_db_search_stage else None,
+                    "search_start_year": search_start_year if is_db_search_stage else None,
+                    "search_end_year": search_end_year if is_db_search_stage else None,
                     "run_date": date.today().isoformat(),
                     "records_added": added,
                     "import_stage": csv_purpose,
                 })
+
+                # =========================
+                # RECORD STAGE ROW COUNTS
+                # =========================
+
+                metadata.setdefault("stage_counts", {})
+
+                if csv_purpose == "Search results to merge & remove duplicates":
+                    # Count actual stored records after deduplication
+                    dedup_path = stage_data_path(project, csv_purpose)
+                    metadata["stage_counts"][csv_purpose] = count_rows(dedup_path)
+                else:
+                    # TA / FT stages are snapshots → exact CSV length
+                    metadata["stage_counts"][csv_purpose] = len(df_std)
 
                 save_metadata(project, metadata)
 
@@ -709,14 +791,15 @@ else:
 st.subheader("📈 Study Flow Overview")
 
 # Total records identified across all searches
-identified = sum(
-    s.get("records_added", 0)
-    for s in metadata.get("searches", [])
-)
+dedup_path = stage_data_path(project, "Search results to merge & remove duplicates")
+ta_path = stage_data_path(project, "Studies included after title/abstract screening")
+ft_path = stage_data_path(project, "Studies included after full-text screening")
 
-ta_count = count_rows(stage_csv_path(project, "Title/abstract screening"))
-ft_count = count_rows(stage_csv_path(project, "Full-text screening"))
-de_count = count_rows(stage_csv_path(project, "Data extraction"))
+identified = count_rows(dedup_path)
+ta_count = count_rows(ta_path)
+ft_count = count_rows(ft_path)
+de_count = ft_count
+
 
 if identified > 0:
     fig = build_sankey_from_counts(
@@ -729,44 +812,35 @@ if identified > 0:
 else:
     st.info("No study flow available yet. Import search results to begin.")
 
-
 # =========================
-# STANDARDIZED RECORD PREVIEW
+# RECORD SNAPSHOTS BY STAGE
 # =========================
 
-st.subheader("🗐 Standardized Record Preview")
+st.subheader("🗐 Record snapshots by stage")
 
-if os.path.exists(csv_file) and os.path.getsize(csv_file) > 0:
-    df_all = pd.read_csv(csv_file)
+tab1, tab2, tab3 = st.tabs([
+    "After deduplication",
+    "After title/abstract screening",
+    "After full-text screening"
+])
 
-    st.caption(
-        f"Showing standardized records combined across all databases "
-        f"({len(df_all)} records)."
-    )
+with tab1:
+    path = stage_data_path(project, "Search results to merge & remove duplicates")
+    if os.path.exists(path):
+        st.dataframe(pd.read_csv(path), use_container_width=True)
+    else:
+        st.info("No deduplicated records uploaded yet.")
 
-    st.dataframe(
-        df_all,
-        use_container_width=True,
-        height=500
-    )
-else:
-    st.info("No standardized records available yet. Import a CSV to begin.")
+with tab2:
+    path = stage_data_path(project, "Studies included after title/abstract screening")
+    if os.path.exists(path):
+        st.dataframe(pd.read_csv(path), use_container_width=True)
+    else:
+        st.info("No title/abstract screening results uploaded yet.")
 
-
-
-
-# -------------------------
-# Download standardized dataset
-# -------------------------
-
-csv_file = csv_path(project)
-
-if os.path.exists(csv_file) and os.path.getsize(csv_file) > 0:
-    df_all = pd.read_csv(csv_file)
-
-    st.download_button(
-        "⬇ Download standardized dataset",
-        df_all.to_csv(index=False),
-        file_name=f"{project}_standardized_records.csv",
-        mime="text/csv"
-    )
+with tab3:
+    path = stage_data_path(project, "Studies included after full-text screening")
+    if os.path.exists(path):
+        st.dataframe(pd.read_csv(path), use_container_width=True)
+    else:
+        st.info("No full-text screening results uploaded yet.")
